@@ -1,8 +1,13 @@
 import textToSpeech from "@google-cloud/text-to-speech";
+import OpenAI from "openai";
 import { spawn } from "node:child_process";
 import { logger } from "../../utils/logger";
 
 const ttsClient = new textToSpeech.TextToSpeechClient();
+const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "alloy";
+const openAiClient = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
 const simplifyPidginText = (text: string): string => {
   return text
@@ -37,9 +42,10 @@ const resolveVoiceName = (language?: TtsLanguage): string | undefined => {
 const synthesizeLinear16 = async (
   text: string,
   language?: TtsLanguage,
+  useVoiceName = true,
 ): Promise<Buffer> => {
   const languageCode = resolveLanguageCode(language);
-  const voiceName = resolveVoiceName(language);
+  const voiceName = useVoiceName ? resolveVoiceName(language) : undefined;
   const [response] = await ttsClient.synthesizeSpeech({
     input: { text },
     voice: {
@@ -62,6 +68,22 @@ const synthesizeLinear16 = async (
   }
 
   return Buffer.from(response.audioContent as Uint8Array);
+};
+
+const synthesizeOpenAiWav = async (text: string): Promise<Buffer> => {
+  if (!openAiClient) {
+    throw new Error("OpenAI TTS is not configured.");
+  }
+
+  const response = await openAiClient.audio.speech.create({
+    model: openAiTtsModel,
+    voice: openAiTtsVoice,
+    input: text,
+    response_format: "wav",
+  });
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 };
 
 const convertWavToOggOpus = async (wavBuffer: Buffer): Promise<Buffer> => {
@@ -118,7 +140,30 @@ export const ttsService = {
         return Buffer.from("");
       }
 
-      const wavBuffer = await synthesizeLinear16(normalizedText, language);
+      let wavBuffer: Buffer;
+      if (openAiClient) {
+        try {
+          wavBuffer = await synthesizeOpenAiWav(normalizedText);
+          return await convertWavToOggOpus(wavBuffer);
+        } catch (error) {
+          logger.warn(error, "OpenAI TTS failed, falling back to Google TTS");
+        }
+      }
+
+      try {
+        wavBuffer = await synthesizeLinear16(normalizedText, language, true);
+      } catch (error) {
+        const voiceName = resolveVoiceName(language);
+        if (voiceName) {
+          logger.warn(
+            { voiceName },
+            "Configured TTS voice failed, retrying with default voice",
+          );
+          wavBuffer = await synthesizeLinear16(normalizedText, language, false);
+        } else {
+          throw error;
+        }
+      }
       return await convertWavToOggOpus(wavBuffer);
     } catch (error) {
       logger.error(error, "Error synthesizing speech with Google Cloud TTS");

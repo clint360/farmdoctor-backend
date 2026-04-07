@@ -3,13 +3,16 @@ import {
   generateAdvice,
   translateLanguage,
   FarmingAdviceData,
+  classifyIntent,
 } from "./farmingAssistant.service";
 import { sttService } from "./ai/stt.service";
 import { ttsService } from "./ai/tts.service";
 import { logger } from "../utils/logger";
+import { getLatestInteraction } from "./interaction.service";
 
 export interface MessageRequest {
   type: "text" | "image" | "voice";
+  userId?: string;
   /**
    * The actual text payload, an accessible public URL to the image file,
    * or an audio buffer for voice notes.
@@ -23,20 +26,67 @@ export interface ProcessedResponse {
   structuredAdvice: FarmingAdviceData;
   finalMessageText: string;
   audioBuffer?: Buffer;
+  userText?: string;
+  shouldLogInteraction?: boolean;
 }
 
-const formatAdviceMessage = (advice: FarmingAdviceData): string => {
+const normalizeText = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+};
+
+const toBullets = (text: unknown): string => {
+  const trimmed = normalizeText(text).trim();
+  if (!trimmed) {
+    return "- ";
+  }
+
+  let parts = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (parts.length <= 1) {
+    parts = trimmed
+      .split(/\.(\s+|$)/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  return parts.map((line) => `- ${line}`).join("\n");
+};
+
+const formatAdviceMessage = (
+  advice: FarmingAdviceData,
+  language?: MessageRequest["preferredLanguage"],
+): string => {
+  const solutionText = normalizeText(advice.solution).trim();
+  const tipsText = normalizeText(advice.tips).trim();
+
+  if (language === "pidgin") {
+    return [
+      `Crop: ${advice.crop}`,
+      `Problem: ${advice.issue}`,
+      "",
+      `Wetin you fit do: ${solutionText}`,
+      `Tips: ${tipsText}`,
+    ].join("\n");
+  }
+
   return [
     `Crop: ${advice.crop}`,
-    `Diagnosis: ${advice.issue}`,
+    `Problem: ${advice.issue}`,
     "",
-    "Action needed:",
-    advice.solution.trim(),
-    "",
-    "Tips:",
-    advice.tips.trim(),
-    "",
-    "If you need more details, reply with a short follow-up.",
+    `What to do: ${solutionText}`,
+    `Tips: ${tipsText}`,
   ].join("\n");
 };
 
@@ -62,6 +112,34 @@ const buildFallbackMessage = (
   return "The service is temporarily unavailable. Please try again in a few minutes.";
 };
 
+const buildAcknowledgementMessage = (
+  preferredLanguage?: MessageRequest["preferredLanguage"],
+): string => {
+  if (preferredLanguage === "pidgin") {
+    return "Thanks! If you get any other question, just tell me.";
+  }
+
+  if (preferredLanguage === "fr") {
+    return "Merci. Si vous avez une autre question, dites-le moi.";
+  }
+
+  return "Thanks. If you have another question, just tell me.";
+};
+
+const buildClarifyMessage = (
+  preferredLanguage?: MessageRequest["preferredLanguage"],
+): string => {
+  if (preferredLanguage === "pidgin") {
+    return "I fit help. Tell me the crop and wetin you see, or send photo/voice.";
+  }
+
+  if (preferredLanguage === "fr") {
+    return "Je peux aider. Dites-moi la culture et ce que vous voyez, ou envoyez une photo/voix.";
+  }
+
+  return "I can help. Tell me the crop and what you see, or send a photo/voice note.";
+};
+
 /**
  * Orchestrator service that processes incoming multimedia messages, evaluates them via AI,
  * optional translates the results, and optionally generates TTS.
@@ -77,9 +155,34 @@ export const processFarmerMessage = async (
   );
 
   try {
+    const lastInteraction = await getLatestInteraction(req.userId);
+    const contextSummary = lastInteraction
+      ? `Previous context: crop=${lastInteraction.crop}, issue=${lastInteraction.issue}.${
+          lastInteraction.lastUserText
+            ? ` Last user message: "${lastInteraction.lastUserText}".`
+            : ""
+        }${
+          lastInteraction.lastAssistantText
+            ? ` Last reply: "${lastInteraction.lastAssistantText}".`
+            : ""
+        }`
+      : undefined;
+
+    let userText: string | undefined;
+
     // 1. Detect message type and generate initial advice
     if (req.type === "image") {
-      advice = await analyzeImage(req.content);
+      if (typeof req.content !== "string") {
+        throw new Error(
+          "Image requests must provide a public image URL string.",
+        );
+      }
+
+      userText = "Image provided";
+      advice = await analyzeImage(req.content, {
+        preferredLanguage: req.preferredLanguage,
+        contextSummary,
+      });
     } else if (req.type === "voice") {
       if (typeof req.content === "string") {
         throw new Error("Voice requests must provide an audio buffer.");
@@ -90,22 +193,70 @@ export const processFarmerMessage = async (
         { transcribedText },
         "Successfully transcribed voice message",
       );
-      advice = await generateAdvice(transcribedText);
+      userText = transcribedText;
+
+      const intentResult = await classifyIntent(
+        transcribedText,
+        contextSummary,
+      );
+      if (intentResult.intent === "gratitude") {
+        return {
+          structuredAdvice: buildFallbackAdvice(),
+          finalMessageText: buildAcknowledgementMessage(req.preferredLanguage),
+          userText,
+          shouldLogInteraction: false,
+        };
+      }
+      if (intentResult.intent === "other") {
+        return {
+          structuredAdvice: buildFallbackAdvice(),
+          finalMessageText: buildClarifyMessage(req.preferredLanguage),
+          userText,
+          shouldLogInteraction: false,
+        };
+      }
+
+      advice = await generateAdvice(transcribedText, {
+        preferredLanguage: req.preferredLanguage,
+        contextSummary,
+      });
     } else {
       if (typeof req.content !== "string") {
         throw new Error("Text requests must provide a string payload.");
       }
 
-      advice = await generateAdvice(req.content);
+      userText = req.content;
+
+      const intentResult = await classifyIntent(req.content, contextSummary);
+      if (intentResult.intent === "gratitude") {
+        return {
+          structuredAdvice: buildFallbackAdvice(),
+          finalMessageText: buildAcknowledgementMessage(req.preferredLanguage),
+          userText,
+          shouldLogInteraction: false,
+        };
+      }
+      if (intentResult.intent === "other") {
+        return {
+          structuredAdvice: buildFallbackAdvice(),
+          finalMessageText: buildClarifyMessage(req.preferredLanguage),
+          userText,
+          shouldLogInteraction: false,
+        };
+      }
+
+      advice = await generateAdvice(req.content, {
+        preferredLanguage: req.preferredLanguage,
+        contextSummary,
+      });
     }
 
     // Combine structured response into a human readable format
-    let finalMessageText = formatAdviceMessage(advice);
+    let finalMessageText = formatAdviceMessage(advice, req.preferredLanguage);
 
     // 2. Translate if necessary
-    if (req.preferredLanguage && req.preferredLanguage !== "en") {
+    if (req.preferredLanguage === "fr") {
       let langParam = "English";
-      if (req.preferredLanguage === "pidgin") langParam = "Cameroon Pidgin";
       if (req.preferredLanguage === "fr") langParam = "French";
 
       const translation = await translateLanguage(finalMessageText, langParam);
@@ -125,6 +276,8 @@ export const processFarmerMessage = async (
       structuredAdvice: advice,
       finalMessageText,
       audioBuffer,
+      userText,
+      shouldLogInteraction: true,
     };
   } catch (error) {
     logger.error(error, "Error executing farmer message processing pipeline");

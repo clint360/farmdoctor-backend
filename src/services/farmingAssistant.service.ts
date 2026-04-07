@@ -1,13 +1,18 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { VertexAI } from "@google-cloud/vertexai";
+import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import sharp from "sharp";
 import { logger } from "../utils/logger";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const geminiApiKey = process.env.GEMINI_API_KEY || "";
+const geminiAI = new GoogleGenAI({ apiKey: geminiApiKey });
 const vertexProjectId = process.env.VERTEX_PROJECT_ID || "";
 const vertexLocation = process.env.VERTEX_LOCATION || "us-central1";
 const vertexModelName = process.env.VERTEX_GEMINI_MODEL || "gemini-1.5-flash";
-let vertexAI: VertexAI | null = null;
+let vertexAI: GoogleGenAI | null = null;
+const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-4o-mini";
+const openAiVisionModel = process.env.OPENAI_VISION_MODEL || openAiTextModel;
+const openAiClient = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
 export interface FarmingAdviceData {
   crop: string;
@@ -20,87 +25,129 @@ export interface TranslationData {
   translatedText: string;
 }
 
-const getJsonModel = () => {
-  return genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    generationConfig: {
-      responseMimeType: "application/json",
-    },
-  });
-};
+export type IntentLabel = "new_request" | "follow_up" | "gratitude" | "other";
 
-const getVertexModel = () => {
+export interface IntentResult {
+  intent: IntentLabel;
+}
+
+const getVertexClient = () => {
   if (!vertexProjectId) {
     return null;
   }
 
   if (!vertexAI) {
-    vertexAI = new VertexAI({
+    vertexAI = new GoogleGenAI({
+      vertexai: true,
       project: vertexProjectId,
       location: vertexLocation,
     });
   }
 
-  return vertexAI.getGenerativeModel({
-    model: vertexModelName,
-    generationConfig: {
+  return vertexAI;
+};
+
+const generateWithClient = async (
+  client: GoogleGenAI,
+  modelName: string,
+  prompt: string,
+  imagePart?: { data: string; mimeType: string },
+): Promise<string> => {
+  const parts = imagePart
+    ? [{ text: prompt }, { inlineData: imagePart }]
+    : [{ text: prompt }];
+
+  const response = await client.models.generateContent({
+    model: modelName,
+    contents: [{ role: "user", parts }],
+    config: {
       responseMimeType: "application/json",
     },
   });
+
+  if (!response.text) {
+    throw new Error("Gemini returned an empty response.");
+  }
+
+  return response.text;
 };
 
-const extractVertexText = (vertexResult: any): string => {
-  const parts = vertexResult?.response?.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    const merged = parts
-      .map((part: any) => part?.text || "")
-      .join("")
-      .trim();
-    if (merged) {
-      return merged;
-    }
+const generateWithOpenAI = async (
+  prompt: string,
+  imagePart?: { data: string; mimeType: string },
+  modelName?: string,
+): Promise<string> => {
+  if (!openAiClient) {
+    throw new Error("OpenAI is not configured.");
   }
 
-  const responseText = vertexResult?.response?.text?.();
-  if (typeof responseText === "string" && responseText.trim()) {
-    return responseText;
+  const model = modelName || openAiTextModel;
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [{ type: "text", text: prompt }];
+
+  if (imagePart?.data && imagePart?.mimeType) {
+    const dataUrl = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+    content.push({ type: "image_url", image_url: { url: dataUrl } });
   }
 
-  return "";
+  const response = await openAiClient.chat.completions.create({
+    model,
+    messages: [{ role: "user", content }],
+    temperature: 0.4,
+  });
+
+  const text = response.choices?.[0]?.message?.content?.trim();
+  if (!text) {
+    throw new Error("OpenAI returned an empty response.");
+  }
+
+  return text;
 };
 
 const generateWithFallback = async (
   prompt: string,
   imagePart?: { inlineData: { data: string; mimeType: string } },
+  modelName?: string,
 ) => {
-  const model = getJsonModel();
+  const resolvedModelName = modelName || "gemini-2.5-flash";
 
   try {
-    const result = await withGeminiRetry(() =>
-      model.generateContent(imagePart ? [prompt, imagePart] : prompt),
+    return await withGeminiRetry(() =>
+      generateWithClient(
+        geminiAI,
+        resolvedModelName,
+        prompt,
+        imagePart?.inlineData,
+      ),
     );
-    return result.response.text();
   } catch (error) {
-    const vertexModel = getVertexModel();
-    if (!vertexModel) {
+    const vertexClient = getVertexClient();
+    if (vertexClient) {
+      try {
+        logger.warn(error, "Gemini API failed, falling back to Vertex AI");
+        const vertexModel = modelName || vertexModelName;
+        return await generateWithClient(
+          vertexClient,
+          vertexModel,
+          prompt,
+          imagePart?.inlineData,
+        );
+      } catch (vertexError) {
+        logger.warn(vertexError, "Vertex AI failed, trying OpenAI fallback");
+      }
+    } else {
       logger.warn(
-        "Vertex AI fallback is not configured; rethrowing Gemini error.",
+        "Vertex AI fallback is not configured; trying OpenAI fallback.",
       );
-      throw error;
     }
 
-    logger.warn(error, "Gemini API failed, falling back to Vertex AI");
-    const parts = imagePart
-      ? [{ text: prompt }, imagePart]
-      : [{ text: prompt }];
-    const vertexResult = await vertexModel.generateContent({
-      contents: [{ role: "user", parts }],
-    });
-    const vertexText = extractVertexText(vertexResult);
-    if (!vertexText) {
-      throw new Error("Vertex AI returned an empty response.");
-    }
-    return vertexText;
+    return await generateWithOpenAI(
+      prompt,
+      imagePart?.inlineData,
+      imagePart ? openAiVisionModel : openAiTextModel,
+    );
   }
 };
 
@@ -138,6 +185,73 @@ const withGeminiRetry = async <T>(operation: () => Promise<T>): Promise<T> => {
     }
     throw error;
   }
+};
+
+const pidginSystemInstruction = `You are a helpful agronomist. Speak and reply only in Cameroon Pidgin English (CamP).
+Use natural Cameroon Pidgin phrasing like "how for do", "for true", and "na so" when it fits.
+Keep the tone professional but warm and very conversational.
+Keep each field short: 1-2 short sentences max. Avoid long lists.
+Do not include any English translation.
+Respond in strict JSON with the exact keys: crop, issue, solution, tips.
+The keys must be in English, but the values must be in Cameroon Pidgin.
+Avoid extra commentary outside the JSON.`;
+
+const buildAdvicePrompt = (
+  inputText: string,
+  usePidgin: boolean,
+  contextSummary?: string,
+): string => {
+  if (usePidgin) {
+    return `${pidginSystemInstruction}
+
+${
+  contextSummary
+    ? `${contextSummary}
+`
+    : ""
+}
+
+User input: ${inputText}`;
+  }
+
+  return `You are an expert agronomist AI.
+Provide concise farming advice based on the user's description.
+Sound like a helpful human, not a formal report.
+Keep each field short: 1-2 short sentences max. Avoid long lists.
+You MUST respond in strict JSON format with exactly these keys:
+{
+  "crop": "The crop being discussed (infer if not directly stated)",
+  "issue": "Brief summary of the issue or diagnosis",
+  "solution": "Detailed, immediate actionable steps to take",
+  "tips": "Long-term preventative measures or best practices"
+}
+
+${
+  contextSummary
+    ? `${contextSummary}
+`
+    : ""
+}
+User input: ${inputText}`;
+};
+
+const buildImagePrompt = (usePidgin: boolean): string => {
+  if (usePidgin) {
+    return `${pidginSystemInstruction}
+
+Analyze the given image of a crop and provide the response in Cameroon Pidgin JSON.`;
+  }
+
+  return `You are an expert agronomist AI.
+Analyze the given image of a crop. 
+Keep each field short: 1-2 short sentences max. Avoid long lists.
+You MUST respond in strict JSON format with exactly these keys:
+{
+  "crop": "Name of the crop identified",
+  "issue": "Name of the identified disease or issue (or 'None')",
+  "solution": "Step-by-step actionable advice for treatment",
+  "tips": "Additional preventative or general farming tips"
+}`;
 };
 
 const detectImageMimeType = (
@@ -234,6 +348,10 @@ const optimizeImageForAnalysis = async (
  */
 export const analyzeImage = async (
   imageUrl: string,
+  options?: {
+    preferredLanguage?: "en" | "fr" | "pidgin";
+    contextSummary?: string;
+  },
 ): Promise<FarmingAdviceData> => {
   try {
     const response = await fetch(imageUrl);
@@ -253,17 +371,14 @@ export const analyzeImage = async (
       },
     };
 
-    const prompt = `You are an expert agronomist AI.
-Analyze the given image of a crop. 
-You MUST respond in strict JSON format with exactly these keys:
-{
-  "crop": "Name of the crop identified",
-  "issue": "Name of the identified disease or issue (or 'None')",
-  "solution": "Step-by-step actionable advice for treatment",
-  "tips": "Additional preventative or general farming tips"
-}`;
-
-    const responseText = await generateWithFallback(prompt, imagePart);
+    const usePidgin = options?.preferredLanguage === "pidgin";
+    const prompt = buildImagePrompt(usePidgin);
+    const modelName = usePidgin ? "gemini-2.5-pro" : undefined;
+    const responseText = await generateWithFallback(
+      prompt,
+      imagePart,
+      modelName,
+    );
 
     return JSON.parse(responseText) as FarmingAdviceData;
   } catch (error) {
@@ -277,21 +392,24 @@ You MUST respond in strict JSON format with exactly these keys:
  */
 export const generateAdvice = async (
   inputText: string,
+  options?: {
+    preferredLanguage?: "en" | "fr" | "pidgin";
+    contextSummary?: string;
+  },
 ): Promise<FarmingAdviceData> => {
   try {
-    const prompt = `You are an expert agronomist AI.
-Provide detailed farming advice based on the user's description.
-You MUST respond in strict JSON format with exactly these keys:
-{
-  "crop": "The crop being discussed (infer if not directly stated)",
-  "issue": "Brief summary of the issue or diagnosis",
-  "solution": "Detailed, immediate actionable steps to take",
-  "tips": "Long-term preventative measures or best practices"
-}
-
-User input: ${inputText}`;
-
-    const responseText = await generateWithFallback(prompt);
+    const usePidgin = options?.preferredLanguage === "pidgin";
+    const prompt = buildAdvicePrompt(
+      inputText,
+      usePidgin,
+      options?.contextSummary,
+    );
+    const modelName = usePidgin ? "gemini-2.5-pro" : undefined;
+    const responseText = await generateWithFallback(
+      prompt,
+      undefined,
+      modelName,
+    );
 
     return JSON.parse(responseText) as FarmingAdviceData;
   } catch (error) {
@@ -333,4 +451,46 @@ Text to translate: "${text}"`;
     logger.error(error, `Error translating to ${targetLanguage} using Gemini`);
     throw error;
   }
+};
+
+export const classifyIntent = async (
+  inputText: string,
+  contextSummary?: string,
+): Promise<IntentResult> => {
+  const prompt = `You are classifying a farmer's message.
+Return a strict JSON object with one key: "intent".
+Allowed values: "new_request", "follow_up", "gratitude", "other".
+
+Rules:
+- "gratitude": thanks, appreciation, closing pleasantries.
+- "follow_up": user references prior advice or asks for clarification.
+- "new_request": a new crop issue or new question.
+- "other": greetings, unrelated chat, or unclear.
+
+${
+  contextSummary
+    ? `${contextSummary}
+`
+    : ""
+}User message: "${inputText}"`;
+
+  try {
+    const responseText = await generateWithFallback(prompt);
+    const parsed = JSON.parse(responseText) as IntentResult;
+    if (
+      parsed?.intent === "new_request" ||
+      parsed?.intent === "follow_up" ||
+      parsed?.intent === "gratitude" ||
+      parsed?.intent === "other"
+    ) {
+      return parsed;
+    }
+  } catch (error) {
+    logger.warn(
+      error,
+      "Intent classification failed; defaulting to new_request",
+    );
+  }
+
+  return { intent: "new_request" };
 };

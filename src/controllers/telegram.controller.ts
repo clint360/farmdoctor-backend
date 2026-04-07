@@ -52,19 +52,26 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
             content: messageText,
             wantsAudio,
             preferredLanguage: user.language as any,
+            userId: user.id,
           });
           await sendMessage(chatId, aiResponse.finalMessageText);
           if (wantsAudio && aiResponse.audioBuffer) {
             const { sendVoice } = await import("../services/telegram.service");
             await sendVoice(chatId, aiResponse.audioBuffer);
           }
-          if (user.id)
-            await logInteraction({
-              user_id: user.id,
-              type: "text",
-              crop: aiResponse.structuredAdvice.crop,
-              issue: aiResponse.structuredAdvice.issue,
-            });
+          if (user.id && aiResponse.shouldLogInteraction !== false)
+            await logInteraction(
+              {
+                user_id: user.id,
+                type: "text",
+                crop: aiResponse.structuredAdvice.crop,
+                issue: aiResponse.structuredAdvice.issue,
+              },
+              {
+                userText: aiResponse.userText,
+                assistantText: aiResponse.finalMessageText,
+              },
+            );
         },
       );
     } else if (photoFileId) {
@@ -79,6 +86,7 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
               content: url,
               wantsAudio,
               preferredLanguage: user.language as any,
+              userId: user.id,
             });
             await sendMessage(chatId, aiResponse.finalMessageText);
             if (wantsAudio && aiResponse.audioBuffer) {
@@ -86,13 +94,19 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
                 await import("../services/telegram.service");
               await sendVoice(chatId, aiResponse.audioBuffer);
             }
-            if (user.id)
-              await logInteraction({
-                user_id: user.id,
-                type: "image",
-                crop: aiResponse.structuredAdvice.crop,
-                issue: aiResponse.structuredAdvice.issue,
-              });
+            if (user.id && aiResponse.shouldLogInteraction !== false)
+              await logInteraction(
+                {
+                  user_id: user.id,
+                  type: "image",
+                  crop: aiResponse.structuredAdvice.crop,
+                  issue: aiResponse.structuredAdvice.issue,
+                },
+                {
+                  userText: aiResponse.userText,
+                  assistantText: aiResponse.finalMessageText,
+                },
+              );
           },
         );
       } else {
@@ -114,6 +128,7 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
               content: audioBuffer,
               wantsAudio,
               preferredLanguage: user.language as any,
+              userId: user.id,
             });
             await sendMessage(chatId, aiResponse.finalMessageText);
             if (wantsAudio && aiResponse.audioBuffer) {
@@ -121,13 +136,19 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
                 await import("../services/telegram.service");
               await sendVoice(chatId, aiResponse.audioBuffer);
             }
-            if (user.id)
-              await logInteraction({
-                user_id: user.id,
-                type: "voice",
-                crop: aiResponse.structuredAdvice.crop,
-                issue: aiResponse.structuredAdvice.issue,
-              });
+            if (user.id && aiResponse.shouldLogInteraction !== false)
+              await logInteraction(
+                {
+                  user_id: user.id,
+                  type: "voice",
+                  crop: aiResponse.structuredAdvice.crop,
+                  issue: aiResponse.structuredAdvice.issue,
+                },
+                {
+                  userText: aiResponse.userText,
+                  assistantText: aiResponse.finalMessageText,
+                },
+              );
           },
         );
       } else {

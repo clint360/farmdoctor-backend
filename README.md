@@ -71,6 +71,13 @@ SUPABASE_KEY=
 # Gemini API (primary)
 GEMINI_API_KEY=
 
+# OpenAI API (optional)
+OPENAI_API_KEY=
+OPENAI_TEXT_MODEL=
+OPENAI_VISION_MODEL=
+OPENAI_TTS_MODEL=
+OPENAI_TTS_VOICE=
+
 # Google Cloud auth
 GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
 
