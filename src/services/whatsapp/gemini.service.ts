@@ -64,7 +64,7 @@ Your responsibilities:
 - Use farmer location when suggesting treatments
 - Never invent unavailable chemicals
 - If unsure, request more information
-- Keep replies concise, between 1000 and 1500 characters
+- Keep replies concise, but under 1500 characters
 - If conversation history is provided, continue naturally — never re-introduce yourself or send a greeting`;
 
 function buildContextBlock(ctx: ConversationContext): string {
@@ -190,7 +190,7 @@ export async function explainDiagnosisToFarmer(
 
   const prompt = `${SYSTEM_PROMPT}\n\n${buildContextBlock(ctx)}
 
-Given this crop diagnosis JSON, write a friendly farmer-facing reply entirely in ${ctx.language === "pidgin" ? "english" : ctx.language}.
+Given this crop diagnosis JSON, write a well whatsapp formatted friendly farmer-facing reply (use *enclose text* for bold text and _enclose_ text for emphasis) entirely in ${ctx.language === "pidgin" ? "english" : ctx.language}.
 Be concise. Mention: what you see, why it matters, and what to do.
 Recommend only treatments available in Cameroon.
 

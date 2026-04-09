@@ -45,7 +45,7 @@ export async function handleImage(msg: ParsedWhatsAppMessage): Promise<void> {
   const lang = conversation.language as Language;
 
   if (!isImageDiagnosisEnabled()) {
-    await sendTextAndLog(msg.from, "Image diagnosis is currently disabled.", conversation.id);
+    await sendTextAndLog(msg.from, "> Image diagnosis is currently disabled.", conversation.id);
     return;
   }
 
