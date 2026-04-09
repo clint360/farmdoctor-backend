@@ -50,22 +50,37 @@ async function synthesizePidgin(text: string): Promise<{ buffer: Buffer; mimeTyp
       headers: {
         Authorization: `Bearer ${getYarnGptKey()}`,
         "Content-Type": "application/json",
-        Accept: "audio/ogg",
+        Accept: "audio/mpeg", // safer default
       },
       body: JSON.stringify({
         text,
         voice: getYarnGptVoice(),
-        response_format: "opus",
+        response_format: "mp3", // safest
       }),
     });
 
     if (!res.ok) {
-      throw new Error(`yarngpt synthesis failed: ${res.status} ${await res.text()}`);
+      throw new Error(`yarngpt failed: ${res.status} ${await res.text()}`);
     }
 
-    const arr = await res.arrayBuffer();
-    return { buffer: Buffer.from(arr), mimeType: "audio/ogg" };
-  }, { label: "yarngpt.synthesizePidgin", attempts: 10, delayMs: 0 });
+    // ✅ STREAM PROPERLY
+    const chunks: Buffer[] = [];
+
+    for await (const chunk of res.body as any) {
+      chunks.push(Buffer.from(chunk));
+    }
+
+    const buffer = Buffer.concat(chunks);
+
+    return {
+      buffer,
+      mimeType: "audio/mpeg",
+    };
+  }, {
+    label: "yarngpt.synthesizePidgin",
+    attempts: 5,
+    delayMs: 500
+  });
 }
 
 // ─── Main voice reply function ──────

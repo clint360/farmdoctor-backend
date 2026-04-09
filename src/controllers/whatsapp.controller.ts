@@ -105,19 +105,30 @@ async function routeWhatsAppMessage(msg: ParsedWhatsAppMessage) {
 }
 
 // ─── Fastify handlers ───────────────
-export const handleWhatsAppVerify = async (request: FastifyRequest, reply: FastifyReply) => {
-  const query = request.query as Record<string, string>;
-  const challenge = verifyWebhookChallenge({
-    mode: query["hub.mode"] || null,
-    token: query["hub.verify_token"] || null,
-    challenge: query["hub.challenge"] || null,
-  });
+export const handleWhatsAppVerify = async (
+  request: FastifyRequest,
+  reply: FastifyReply
+) => {
+  const mode = (request.query as any)["hub.mode"];
+  const token = (request.query as any)["hub.verify_token"];
+  const challenge = (request.query as any)["hub.challenge"];
 
-  if (challenge === null) {
-    return reply.status(403).send("Forbidden");
+  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    request.log.info("WhatsApp webhook verified successfully");
+
+    return reply
+      .code(200)
+      .header("Content-Type", "text/plain")
+      .send(challenge);
   }
 
-  return reply.status(200).type("text/plain").send(challenge);
+  request.log.error(
+  `Webhook verification failed: mode=${mode}, token=${token}`
+);;
+
+  return reply.code(403).send("Forbidden");
 };
 
 export const handleWhatsAppWebhook = async (request: FastifyRequest, reply: FastifyReply) => {
