@@ -3,12 +3,17 @@ import OpenAI from "openai";
 import sharp from "sharp";
 import { logger } from "../utils/logger";
 
-const geminiApiKey = process.env.GEMINI_API_KEY || "";
-const geminiAI = new GoogleGenAI({ apiKey: geminiApiKey });
 const vertexProjectId = process.env.VERTEX_PROJECT_ID || "";
 const vertexLocation = process.env.VERTEX_LOCATION || "us-central1";
-const vertexModelName = process.env.VERTEX_GEMINI_MODEL || "gemini-1.5-flash";
+const vertexModelName = process.env.VERTEX_GEMINI_MODEL || "gemini-2.5-flash";
 let vertexAI: GoogleGenAI | null = null;
+const geminiApiKey = process.env.GEMINI_API_KEY || "";
+let geminiAI: GoogleGenAI | null = null;
+const getGeminiAI = (): GoogleGenAI | null => {
+  if (!geminiApiKey) return null;
+  if (!geminiAI) geminiAI = new GoogleGenAI({ apiKey: geminiApiKey });
+  return geminiAI;
+};
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-4o-mini";
 const openAiVisionModel = process.env.OPENAI_VISION_MODEL || openAiTextModel;
@@ -113,42 +118,46 @@ const generateWithFallback = async (
 ) => {
   const resolvedModelName = modelName || "gemini-2.5-flash";
 
-  try {
-    return await withGeminiRetry(() =>
-      generateWithClient(
-        geminiAI,
-        resolvedModelName,
-        prompt,
-        imagePart?.inlineData,
-      ),
-    );
-  } catch (error) {
-    const vertexClient = getVertexClient();
-    if (vertexClient) {
-      try {
-        logger.warn(error, "Gemini API failed, falling back to Vertex AI");
-        const vertexModel = modelName || vertexModelName;
-        return await generateWithClient(
+  // Try Vertex AI first (preferred)
+  const vertexClient = getVertexClient();
+  if (vertexClient) {
+    try {
+      return await withGeminiRetry(() =>
+        generateWithClient(
           vertexClient,
-          vertexModel,
+          modelName || vertexModelName,
           prompt,
           imagePart?.inlineData,
-        );
-      } catch (vertexError) {
-        logger.warn(vertexError, "Vertex AI failed, trying OpenAI fallback");
-      }
-    } else {
-      logger.warn(
-        "Vertex AI fallback is not configured; trying OpenAI fallback.",
+        ),
       );
+    } catch (vertexError) {
+      logger.warn(vertexError, "Vertex AI failed, trying API key fallback");
     }
-
-    return await generateWithOpenAI(
-      prompt,
-      imagePart?.inlineData,
-      imagePart ? openAiVisionModel : openAiTextModel,
-    );
   }
+
+  // Fall back to API key
+  const apiKeyClient = getGeminiAI();
+  if (apiKeyClient) {
+    try {
+      return await withGeminiRetry(() =>
+        generateWithClient(
+          apiKeyClient,
+          resolvedModelName,
+          prompt,
+          imagePart?.inlineData,
+        ),
+      );
+    } catch (error) {
+      logger.warn(error, "Gemini API key failed, trying OpenAI fallback");
+    }
+  }
+
+  // Final fallback: OpenAI
+  return await generateWithOpenAI(
+    prompt,
+    imagePart?.inlineData,
+    imagePart ? openAiVisionModel : openAiTextModel,
+  );
 };
 
 const sleep = (ms: number): Promise<void> =>

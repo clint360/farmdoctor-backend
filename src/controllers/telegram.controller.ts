@@ -10,6 +10,27 @@ import { processOnboarding } from "../services/onboarding.service";
 import { getUser } from "../services/user.service";
 import { processFarmerMessage } from "../services/messageProcessor.service";
 import { logInteraction } from "../services/interaction.service";
+import { supabase } from "../services/db/supabase.service";
+
+/**
+ * Ensure a conversation record exists for this Telegram user
+ */
+const ensureTelegramConversation = async (chatId: number, firstName?: string) => {
+  const phone = `tg_${chatId}`;
+  const { data: existing } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (!existing) {
+    await supabase.from("conversations").insert({
+      phone,
+      name: firstName || null,
+      platform: "telegram",
+    });
+  }
+};
 
 /**
  * Validates and routes Telegram webhooks intelligently
@@ -18,6 +39,11 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
   if (!update.message) return;
 
   const chatId = update.message.chat.id;
+
+  // Track conversation for analytics
+  ensureTelegramConversation(chatId, update.message.from?.first_name).catch((err) => {
+    logger.warn(err, "Failed to ensure Telegram conversation record");
+  });
   const messageText = update.message.text;
   const photoFileId = update.message.photo
     ? update.message.photo[update.message.photo.length - 1].file_id
