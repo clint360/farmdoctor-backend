@@ -225,6 +225,37 @@ export async function sendWhatsAppAudio(to: string, mediaId: string): Promise<vo
   }
 }
 
+export async function sendWhatsAppButtons(
+  to: string,
+  body: string,
+  buttons: Array<{ id: string; title: string }>,
+): Promise<void> {
+  const c = getConfig();
+  const res = await fetch(`${graphBase()}/${c.phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { ...authHeader(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: body },
+        action: {
+          buttons: buttons.map((b) => ({
+            type: "reply",
+            reply: { id: b.id, title: b.title },
+          })),
+        },
+      },
+    }),
+  });
+  if (!res.ok) {
+    logger.error({ status: res.status, body: await res.text() }, "sendWhatsAppButtons failed");
+  }
+}
+
 export async function markAsRead(messageId: string): Promise<void> {
   const c = getConfig();
   try {
@@ -240,6 +271,59 @@ export async function markAsRead(messageId: string): Promise<void> {
     });
   } catch {
     // best-effort
+  }
+}
+
+// ─────────────────────────────────────
+// Typing indicator (persistent loop)
+// ─────────────────────────────────────
+// WhatsApp typing indicator expires after ~25 seconds.
+// We re-send every 20 s so the user sees "typing…" the whole time.
+const TYPING_INTERVAL_MS = 20_000;
+const activeTypingLoops = new Map<string, NodeJS.Timeout>();
+
+async function sendTypingOnce(to: string): Promise<void> {
+  const c = getConfig();
+  try {
+    await fetch(`${graphBase()}/${c.phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { ...authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "text",
+        // Reuse the mark-as-read trick with typing_indicator
+        status: "read",
+        message_id: "placeholder",
+        typing_indicator: { type: "text" },
+      }),
+    });
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Start a persistent typing indicator for `to`.
+ * Sends immediately, then every 20 s. Returns a stop function.
+ */
+export function startTypingIndicator(to: string): () => void {
+  // Avoid duplicate loops for the same user
+  stopTypingIndicator(to);
+
+  sendTypingOnce(to);
+  const timer = setInterval(() => sendTypingOnce(to), TYPING_INTERVAL_MS);
+  activeTypingLoops.set(to, timer);
+
+  return () => stopTypingIndicator(to);
+}
+
+export function stopTypingIndicator(to: string): void {
+  const existing = activeTypingLoops.get(to);
+  if (existing) {
+    clearInterval(existing);
+    activeTypingLoops.delete(to);
   }
 }
 

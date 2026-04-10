@@ -1,4 +1,4 @@
-import { ParsedWhatsAppMessage, markAsRead, fetchWhatsAppMedia } from "../../whatsapp.service";
+import { ParsedWhatsAppMessage, markAsRead, fetchWhatsAppMedia, startTypingIndicator, stopTypingIndicator } from "../../whatsapp.service";
 import {
   getOrCreateConversation,
   updateConversation,
@@ -12,6 +12,8 @@ import { Language } from "../gemini.service";
 import { sendTextAndLog, sendReplyAndLog } from "../send.service";
 import { languageUnknownFallback } from "../language.service";
 import { logger } from "../../../utils/logger";
+import { checkAndEnforceQuota } from "../../subscription.service";
+import { maybeSuggestExpert } from "../expert-suggest.service";
 
 const getStorageBucket = () => process.env.SUPABASE_STORAGE_BUCKET || "crop-images";
 const isImageDiagnosisEnabled = () => {
@@ -49,67 +51,83 @@ export async function handleImage(msg: ParsedWhatsAppMessage): Promise<void> {
     return;
   }
 
-  // 1. Two-step media fetch from Meta Graph API
-  const { buffer, mimeType } = await fetchWhatsAppMedia(msg.mediaId);
-
-  // 2. Upload to Supabase Storage: crop-images/{conversation_id}/{timestamp}.{ext}
-  const ts = Date.now();
-  const ext = extensionFromMime(mimeType);
-  const path = `${conversation.id}/${ts}.${ext}`;
-
-  const { error: upErr } = await supabase.storage
-    .from(getStorageBucket())
-    .upload(path, buffer, { contentType: mimeType || "image/jpeg", upsert: false });
-  if (upErr) {
-    logger.error(upErr, "Supabase storage upload failed");
+  // Quota check before expensive AI processing
+  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "image");
+  if (!quota.allowed) {
+    await sendTextAndLog(msg.from, quota.message!, conversation.id);
+    return;
   }
 
-  const { data: pub } = supabase.storage
-    .from(getStorageBucket())
-    .getPublicUrl(path);
-  const imageUrl = pub?.publicUrl ?? null;
+  // Start persistent typing indicator for the entire processing pipeline
+  startTypingIndicator(msg.from);
+  try {
+    // 1. Two-step media fetch from Meta Graph API
+    const { buffer, mimeType } = await fetchWhatsAppMedia(msg.mediaId);
 
-  // Log inbound image (now that we have the storage URL for the dashboard)
-  await logMessage({
-    conversation_id: conversation.id,
-    direction: "in",
-    type: "image",
-    media_url: imageUrl,
-    wa_message_id: msg.messageId,
-  });
+    // 2. Upload to Supabase Storage: crop-images/{conversation_id}/{timestamp}.{ext}
+    const ts = Date.now();
+    const ext = extensionFromMime(mimeType);
+    const path = `${conversation.id}/${ts}.${ext}`;
 
-  // 3. Diagnose via Gemini Vision
-  const diagnosis = await gemini.diagnoseImage(buffer, mimeType || "image/jpeg", {
-    language: lang,
-    city: conversation.city,
-    cropTypes: profile.crop_types,
-    lastCrop: conversation.last_crop,
-  });
+    const { error: upErr } = await supabase.storage
+      .from(getStorageBucket())
+      .upload(path, buffer, { contentType: mimeType || "image/jpeg", upsert: false });
+    if (upErr) {
+      logger.error(upErr, "Supabase storage upload failed");
+    }
 
-  // 4. Persist crop report
-  await saveCropReport({
-    conversation_id: conversation.id,
-    crop_type: diagnosis.cropType,
-    image_url: imageUrl,
-    diagnosis: diagnosis.disease ?? diagnosis.deficiency ?? null,
-    treatment: diagnosis.treatment || null,
-    confidence: diagnosis.confidence,
-    location: conversation.city,
-  });
+    const { data: pub } = supabase.storage
+      .from(getStorageBucket())
+      .getPublicUrl(path);
+    const imageUrl = pub?.publicUrl ?? null;
 
-  await incrementProfileUsage(profile.id, "usage_images", 1);
+    // Log inbound image (now that we have the storage URL for the dashboard)
+    await logMessage({
+      conversation_id: conversation.id,
+      direction: "in",
+      type: "image",
+      media_url: imageUrl,
+      wa_message_id: msg.messageId,
+    });
 
-  // 5. Update last_crop if we identified it
-  if (diagnosis.cropType) {
-    await updateConversation(conversation.id, { last_crop: diagnosis.cropType });
+    // 3. Diagnose via Gemini Vision
+    const diagnosis = await gemini.diagnoseImage(buffer, mimeType || "image/jpeg", {
+      language: lang,
+      city: conversation.city,
+      cropTypes: profile.crop_types,
+      lastCrop: conversation.last_crop,
+    });
+
+    // 4. Persist crop report
+    await saveCropReport({
+      conversation_id: conversation.id,
+      crop_type: diagnosis.cropType,
+      image_url: imageUrl,
+      diagnosis: diagnosis.disease ?? diagnosis.deficiency ?? null,
+      treatment: diagnosis.treatment || null,
+      confidence: diagnosis.confidence,
+      location: conversation.city,
+    });
+
+    await incrementProfileUsage(profile.id, "usage_images", 1);
+
+    // 5. Update last_crop if we identified it
+    if (diagnosis.cropType) {
+      await updateConversation(conversation.id, { last_crop: diagnosis.cropType });
+    }
+
+    // 6. Friendly reply
+    const reply = await gemini.explainDiagnosisToFarmer(diagnosis, {
+      language: lang,
+      city: conversation.city,
+      cropTypes: profile.crop_types,
+    });
+
+    await sendReplyAndLog(msg.from, reply, lang, false, conversation.id);
+
+    // Image diagnosis is a natural trigger for expert help
+    await maybeSuggestExpert(msg.from, conversation.id, conversation.city, lang);
+  } finally {
+    stopTypingIndicator(msg.from);
   }
-
-  // 6. Friendly reply
-  const reply = await gemini.explainDiagnosisToFarmer(diagnosis, {
-    language: lang,
-    city: conversation.city,
-    cropTypes: profile.crop_types,
-  });
-
-  await sendReplyAndLog(msg.from, reply, lang, false, conversation.id);
 }

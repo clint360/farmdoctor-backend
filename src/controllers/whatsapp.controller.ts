@@ -18,6 +18,7 @@ import {
 import { logMessage } from "../services/whatsapp/messages.service";
 import { askCity } from "../services/whatsapp/language.service";
 import { Language } from "../services/whatsapp/gemini.service";
+import { handleExpertResponse } from "../services/whatsapp/expert-suggest.service";
 
 // ─── Deduplication ──────────────────
 const DEDUP_TTL = 5 * 60 * 1000;
@@ -58,6 +59,21 @@ async function routeWhatsAppMessage(msg: ParsedWhatsAppMessage) {
     // If the user taps a language from the list, we handle it here
     // before the normal text/image/audio handlers.
     if (msg.type === "interactive" && msg.interactiveId) {
+      // ── Expert suggestion response ──
+      if (msg.interactiveId === "expert_yes" || msg.interactiveId === "expert_no") {
+        const { conversation } = await getOrCreateConversation(msg.from, msg.profileName);
+        const lang = (conversation.language || "english") as Language;
+        await handleExpertResponse(
+          msg.from,
+          conversation.id,
+          conversation.city,
+          lang,
+          msg.interactiveId === "expert_yes",
+        );
+        return;
+      }
+
+      // ── Language selection ──
       const lang = parseLanguageFromInteractive(msg.interactiveId);
       if (lang) {
         const { conversation } = await getOrCreateConversation(msg.from, msg.profileName);

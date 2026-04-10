@@ -16,12 +16,12 @@ export const PLAN_PRICES: Record<string, number> = {
 };
 
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
-  starter: { voice_minutes: 10, image_analyses: 10, can_access_experts: false },
+  starter: { voice_minutes: 12, image_analyses: 10, can_access_experts: false },
   pro: { voice_minutes: 60, image_analyses: 30, can_access_experts: true },
   cooperative: { voice_minutes: 300, image_analyses: 50, can_access_experts: true },
 };
 
-const FREE_LIMITS: PlanLimits = { voice_minutes: 2, image_analyses: 3, can_access_experts: false };
+const FREE_LIMITS: PlanLimits = { voice_minutes: 5, image_analyses: 3, can_access_experts: false };
 const FREE_MESSAGE_LIMIT = 10;
 
 export const VALID_PLANS = ["starter", "pro", "cooperative"] as const;
@@ -35,6 +35,7 @@ export interface QuotaCheckResult {
 // ─── Quota enforcement ──────────────
 export async function checkAndEnforceQuota(
   phone: string,
+  conversationId: string,
   messageType: "text" | "voice" | "image",
 ): Promise<QuotaCheckResult> {
   try {
@@ -53,24 +54,29 @@ export async function checkAndEnforceQuota(
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const { count: messageCount } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .eq("conversation_id", phone)
-      .gte("created_at", startOfMonth.toISOString());
+    // Free users: count inbound messages this month
+    if (plan === "free") {
+      const { count: messageCount } = await supabase
+        .from("messages")
+        .select("*", { count: "exact", head: true })
+        .eq("conversation_id", conversationId)
+        .eq("direction", "in")
+        .gte("created_at", startOfMonth.toISOString());
 
-    if (plan === "free" && (messageCount || 0) >= FREE_MESSAGE_LIMIT) {
-      return {
-        allowed: false,
-        message: `You've used your ${FREE_MESSAGE_LIMIT} free messages this month. Subscribe to continue!\n\nPlans start at 1,000 XAF/month.\nVisit: https://farm-doctor.vercel.app/subscribe`,
-      };
+      if ((messageCount || 0) > FREE_MESSAGE_LIMIT) {
+        return {
+          allowed: false,
+          message: `You've used your ${FREE_MESSAGE_LIMIT} free messages this month. Subscribe to continue!\n\nPlans start at 1,000 XAF/month.\nVisit: https://farm-doctor.vercel.app/subscribe`,
+        };
+      }
     }
 
+    // Image quota (applies to all plans)
     if (messageType === "image") {
       const { count: imageCount } = await supabase
         .from("messages")
         .select("*", { count: "exact", head: true })
-        .eq("conversation_id", phone)
+        .eq("conversation_id", conversationId)
         .eq("type", "image")
         .eq("direction", "in")
         .gte("created_at", startOfMonth.toISOString());
@@ -79,6 +85,26 @@ export async function checkAndEnforceQuota(
         return {
           allowed: false,
           message: `You've reached your monthly image analysis limit (${limits.image_analyses}). Upgrade your plan for more!\nVisit: https://farm-doctor.vercel.app/subscribe`,
+        };
+      }
+    }
+
+    // Voice minute quota (applies to all plans)
+    if (messageType === "voice") {
+      const { count: voiceCount } = await supabase
+        .from("messages")
+        .select("*", { count: "exact", head: true })
+        .eq("conversation_id", conversationId)
+        .eq("type", "audio")
+        .eq("direction", "in")
+        .gte("created_at", startOfMonth.toISOString());
+
+      // Avg WhatsApp voice note ≈ 30s → 0.5 min each
+      const estimatedMinutes = (voiceCount || 0) * 0.5;
+      if (estimatedMinutes >= limits.voice_minutes) {
+        return {
+          allowed: false,
+          message: `You've reached your monthly voice limit (${limits.voice_minutes} minutes). Upgrade your plan for more!\nVisit: https://farm-doctor.vercel.app/subscribe`,
         };
       }
     }

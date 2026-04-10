@@ -1,4 +1,4 @@
-import { ParsedWhatsAppMessage, markAsRead, sendWhatsAppText } from "../../whatsapp.service";
+import { ParsedWhatsAppMessage, markAsRead, sendWhatsAppText, startTypingIndicator, stopTypingIndicator } from "../../whatsapp.service";
 import { sendLanguageMenu } from "../../whatsapp.service";
 import {
   getOrCreateConversation,
@@ -14,6 +14,8 @@ import {
 import * as gemini from "../gemini.service";
 import { Language } from "../gemini.service";
 import { sendTextAndLog, sendReplyAndLog } from "../send.service";
+import { checkAndEnforceQuota } from "../../subscription.service";
+import { maybeSuggestExpert } from "../expert-suggest.service";
 
 async function buildHistoryContext(conversationId: string) {
   const msgs = await getConversationMessages(conversationId, 20);
@@ -77,16 +79,31 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
     return;
   }
 
-  // ── Step 3: normal chat reasoning ───
-  const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-  const reply = await gemini.chat(text, {
-    language: lang,
-    city: conversation.city,
-    lastCrop: conversation.last_crop,
-    cropTypes: profile.crop_types,
-    summary,
-    lastMessage,
-  });
+  // ── Step 3: quota check before AI processing ──
+  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "text");
+  if (!quota.allowed) {
+    await sendTextAndLog(msg.from, quota.message!, conversation.id);
+    return;
+  }
 
-  await sendReplyAndLog(msg.from, reply, lang, false, conversation.id);
+  // ── Step 4: normal chat reasoning ───
+  startTypingIndicator(msg.from);
+  try {
+    const { summary, lastMessage } = await buildHistoryContext(conversation.id);
+    const reply = await gemini.chat(text, {
+      language: lang,
+      city: conversation.city,
+      lastCrop: conversation.last_crop,
+      cropTypes: profile.crop_types,
+      summary,
+      lastMessage,
+    });
+
+    await sendReplyAndLog(msg.from, reply, lang, false, conversation.id);
+
+    // ── Step 5: maybe suggest expert (non-blocking) ──
+    await maybeSuggestExpert(msg.from, conversation.id, conversation.city, lang);
+  } finally {
+    stopTypingIndicator(msg.from);
+  }
 }
