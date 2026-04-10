@@ -47,6 +47,23 @@ export interface TelegramUpdate {
       file_size?: number;
     };
   };
+  callback_query?: {
+    id: string;
+    from: {
+      id: number;
+      is_bot: boolean;
+      first_name: string;
+      language_code?: string;
+    };
+    message?: {
+      message_id: number;
+      chat: {
+        id: number;
+        type: string;
+      };
+    };
+    data?: string;
+  };
 }
 
 // Orchestration moved to controller
@@ -202,6 +219,39 @@ export const sendChatAction = async (
   }
 };
 
+export const answerCallbackQuery = async (
+  callbackQueryId: string,
+  text?: string,
+): Promise<void> => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    logger.error("TELEGRAM_BOT_TOKEN is missing in environment variables");
+    return;
+  }
+
+  const url = `https://api.telegram.org/bot${token}/answerCallbackQuery`;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      logger.warn(
+        { errorData, status: response.status },
+        "Failed to answer callback query",
+      );
+    }
+  } catch (error) {
+    logger.warn(error, "Error answering callback query");
+  }
+};
+
 export const registerWebhook = async () => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
@@ -233,5 +283,40 @@ export const registerWebhook = async () => {
     }
   } catch (error) {
     logger.error(error, "Error registering Telegram webhook");
+  }
+};
+
+export const registerCommands = async () => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    logger.warn("Skipping Telegram commands registration. Token missing.");
+    return;
+  }
+
+  const url = `https://api.telegram.org/bot${token}/setMyCommands`;
+  const commands = [
+    { command: "menu", description: "Show options" },
+    { command: "settings", description: "Reset your preferences" },
+    { command: "start", description: "Start over" },
+  ];
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commands }),
+    });
+
+    const data = (await response.json()) as any;
+    if (!response.ok || !data.ok) {
+      logger.error(
+        { data, status: response.status },
+        "Failed to register Telegram commands",
+      );
+    } else {
+      logger.info("Successfully registered Telegram commands");
+    }
+  } catch (error) {
+    logger.error(error, "Error registering Telegram commands");
   }
 };

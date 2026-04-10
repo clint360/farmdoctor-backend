@@ -28,10 +28,15 @@ export type FarmerProfile = {
 };
 
 // ─── Get or create conversation + profile ───
-export async function getOrCreateConversation(
+async function getOrCreateConversationInternal(
   phone: string,
-  profileName?: string | null
-): Promise<{ conversation: Conversation; profile: FarmerProfile; isNew: boolean }> {
+  platform: "whatsapp" | "telegram",
+  profileName?: string | null,
+): Promise<{
+  conversation: Conversation;
+  profile: FarmerProfile;
+  isNew: boolean;
+}> {
   // ── Conversation ────────────────────
   const { data: existing, error: selErr } = await supabase
     .from("conversations")
@@ -49,7 +54,7 @@ export async function getOrCreateConversation(
     isNew = true;
     const { data, error } = await supabase
       .from("conversations")
-      .insert({ phone, name: profileName ?? null, platform: "whatsapp" })
+      .insert({ phone, name: profileName ?? null, platform })
       .select()
       .single();
     if (error) throw error;
@@ -80,8 +85,34 @@ export async function getOrCreateConversation(
   return { conversation, profile, isNew };
 }
 
+export async function getOrCreateConversation(
+  phone: string,
+  profileName?: string | null,
+): Promise<{
+  conversation: Conversation;
+  profile: FarmerProfile;
+  isNew: boolean;
+}> {
+  return getOrCreateConversationInternal(phone, "whatsapp", profileName);
+}
+
+export async function getOrCreateConversationForPlatform(
+  phone: string,
+  platform: "whatsapp" | "telegram",
+  profileName?: string | null,
+): Promise<{
+  conversation: Conversation;
+  profile: FarmerProfile;
+  isNew: boolean;
+}> {
+  return getOrCreateConversationInternal(phone, platform, profileName);
+}
+
 // ─── Update helpers ─────────────────
-export async function updateConversation(id: string, patch: Partial<Conversation>): Promise<void> {
+export async function updateConversation(
+  id: string,
+  patch: Partial<Conversation>,
+): Promise<void> {
   const { error } = await supabase
     .from("conversations")
     .update({ ...patch, updated_at: new Date().toISOString() })
@@ -89,7 +120,10 @@ export async function updateConversation(id: string, patch: Partial<Conversation
   if (error) throw error;
 }
 
-export async function updateProfile(id: string, patch: Partial<FarmerProfile>): Promise<void> {
+export async function updateProfile(
+  id: string,
+  patch: Partial<FarmerProfile>,
+): Promise<void> {
   const { error } = await supabase
     .from("farmer_profiles")
     .update({ ...patch, updated_at: new Date().toISOString() })
@@ -100,9 +134,13 @@ export async function updateProfile(id: string, patch: Partial<FarmerProfile>): 
 export async function incrementProfileUsage(
   id: string,
   field: "usage_images" | "usage_voice_minutes",
-  by: number = 1
+  by: number = 1,
 ): Promise<void> {
-  const { data } = await supabase.from("farmer_profiles").select(field).eq("id", id).maybeSingle();
+  const { data } = await supabase
+    .from("farmer_profiles")
+    .select(field)
+    .eq("id", id)
+    .maybeSingle();
   const row = data as Record<string, number> | null;
   const current = row?.[field] ?? 0;
   await supabase
