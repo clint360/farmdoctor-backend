@@ -51,15 +51,24 @@ export interface PaymentStatusResponse {
   dateConfirmed: string;
 }
 
+// ─── Helpers ────────────────────────
+// Fapshi expects local phone format (e.g. 680612360), not international (237680612360)
+function stripCountryCode(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("237") && digits.length > 9) return digits.slice(3);
+  return digits;
+}
+
 // ─── Direct Pay ─────────────────────
 export async function initDirectPay(req: DirectPayRequest): Promise<DirectPayResponse> {
   const url = `${getBaseUrl()}/direct-pay`;
-  logger.info({ phone: req.phone, amount: req.amount, medium: req.medium }, "[fapshi] initiating direct pay");
+  const cleanPhone = stripCountryCode(req.phone);
+  logger.info({ phone: cleanPhone, amount: req.amount, medium: req.medium }, "[fapshi] initiating direct pay");
 
   const res = await fetch(url, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify(req),
+    body: JSON.stringify({ ...req, phone: cleanPhone }),
   });
 
   if (!res.ok) {
