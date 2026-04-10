@@ -2,9 +2,22 @@ import { FastifyRequest, FastifyReply } from "fastify";
 import { createWebCall } from "../services/retell.service";
 import { logger } from "../utils/logger";
 
-// ─── In-memory rate limit: 1 call per IP per day (no DB) ───
-const CALL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-const callLog = new Map<string, number>();
+// ─── In-memory rate limit: 3 min (180s) of call time per IP per day ───
+const MAX_DAILY_SECONDS = 3 * 60; // 180s
+
+interface UsageEntry { date: string; usedSeconds: number }
+const usageLog = new Map<string, UsageEntry>();
+
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+function getUsage(ip: string): UsageEntry {
+  const entry = usageLog.get(ip);
+  const today = todayKey();
+  if (!entry || entry.date !== today) return { date: today, usedSeconds: 0 };
+  return entry;
+}
 
 function isLocalhost(origin: string | undefined, ip: string | undefined): boolean {
   if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(origin)) return true;
@@ -12,10 +25,10 @@ function isLocalhost(origin: string | undefined, ip: string | undefined): boolea
   return false;
 }
 
-function cleanCallLog(): void {
-  const now = Date.now();
-  for (const [k, ts] of callLog) {
-    if (now - ts > CALL_COOLDOWN_MS) callLog.delete(k);
+function cleanUsageLog(): void {
+  const today = todayKey();
+  for (const [k, v] of usageLog) {
+    if (v.date !== today) usageLog.delete(k);
   }
 }
 
@@ -23,30 +36,31 @@ export const handleCreateWebCall = async (request: FastifyRequest, reply: Fastif
   try {
     const clientIp = request.ip || "unknown";
     const origin = request.headers.origin;
+    const isDev = isLocalhost(origin, clientIp);
 
-    // Skip rate limit for localhost/dev
-    if (!isLocalhost(origin, clientIp)) {
-      if (callLog.size > 5000) cleanCallLog();
-      const lastCall = callLog.get(clientIp);
-      if (lastCall && Date.now() - lastCall < CALL_COOLDOWN_MS) {
+    if (!isDev) {
+      if (usageLog.size > 5000) cleanUsageLog();
+      const usage = getUsage(clientIp);
+      const remaining = MAX_DAILY_SECONDS - usage.usedSeconds;
+      if (remaining <= 0) {
         return reply.status(429).send({
           success: false,
-          message: "You can only make 1 call per day. Please try again tomorrow.",
+          remaining_seconds: 0,
+          message: "You've used your 3 free minutes for today. Please try again tomorrow.",
         });
       }
     }
 
     const result = await createWebCall();
 
-    // Record successful call (skip for localhost)
-    if (!isLocalhost(origin, clientIp)) {
-      callLog.set(clientIp, Date.now());
-    }
+    const usage = getUsage(clientIp);
+    const remaining = isDev ? MAX_DAILY_SECONDS : MAX_DAILY_SECONDS - usage.usedSeconds;
 
     return reply.status(200).send({
       success: true,
       access_token: result.access_token,
       call_id: result.call_id,
+      remaining_seconds: remaining,
     });
   } catch (error: any) {
     logger.error(error, "Error creating Retell web call");
@@ -55,4 +69,27 @@ export const handleCreateWebCall = async (request: FastifyRequest, reply: Fastif
       message: error.message || "Failed to create call session",
     });
   }
+};
+
+// ─── Report call duration when call ends ───
+export const handleCallEnded = async (
+  request: FastifyRequest<{ Body: { duration: number } }>,
+  reply: FastifyReply,
+) => {
+  const clientIp = request.ip || "unknown";
+  const origin = request.headers.origin;
+
+  if (isLocalhost(origin, clientIp)) {
+    return reply.send({ success: true, remaining_seconds: MAX_DAILY_SECONDS });
+  }
+
+  const duration = Math.max(0, Math.ceil(request.body?.duration || 0));
+  const usage = getUsage(clientIp);
+  usage.usedSeconds += duration;
+  usageLog.set(clientIp, usage);
+
+  const remaining = Math.max(0, MAX_DAILY_SECONDS - usage.usedSeconds);
+  logger.info({ ip: clientIp, duration, totalUsed: usage.usedSeconds, remaining }, "Call ended, usage updated");
+
+  return reply.send({ success: true, remaining_seconds: remaining });
 };

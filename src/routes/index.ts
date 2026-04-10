@@ -4,7 +4,7 @@ import { handleTelegramWebhook } from '../controllers/telegram.controller';
 import { handleWhatsAppVerify, handleWhatsAppWebhook } from '../controllers/whatsapp.controller';
 import { handleExpertApply, handleExpertPaymentStatus, handleGetExperts } from '../controllers/expert.controller';
 import { handleGetSubscription, handleCreateSubscription, handlePaymentStatus } from '../controllers/subscription.controller';
-import { handleCreateWebCall } from '../controllers/retell.controller';
+import { handleCreateWebCall, handleCallEnded } from '../controllers/retell.controller';
 
 /**
  * Setup all application routes
@@ -31,4 +31,5 @@ export const setupRoutes = async (fastify: FastifyInstance) => {
 
   // Retell AI web calls
   fastify.post('/api/retell/create-web-call', handleCreateWebCall);
+  fastify.post('/api/retell/call-ended', handleCallEnded);
 };
