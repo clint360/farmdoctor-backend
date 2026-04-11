@@ -5,8 +5,9 @@ import {
   getPaymentStatus,
   FapshiStatus,
 } from "./fapshi.service";
-import { createSubscriptionLimitMessage } from "./whatsapp/language.service";
+import { createSubscriptionLimitMessage, createSubscriptionConfirmationMessage } from "./whatsapp/language.service";
 import { Language } from "./whatsapp/gemini.service";
+import { sendWhatsAppText } from "./whatsapp.service";
 
 // ─── Plan definitions ───────────────
 export interface PlanLimits {
@@ -280,6 +281,21 @@ export async function checkPaymentAndActivate(transId: string): Promise<{
             updated_at: new Date().toISOString(),
           },
           { onConflict: "phone" },
+        );
+
+        // Look up the farmer's language from their conversation, fallback to english
+        const { data: convo } = await supabase
+          .from("conversations")
+          .select("language")
+          .eq("phone", `237${normalizePhone(payment.phone)}`)
+          .maybeSingle();
+
+        const lang: Language = (convo?.language as Language) || "english";
+        const waPhone = `237${normalizePhone(payment.phone)}`;
+        const confirmMsg = createSubscriptionConfirmationMessage(lang, payment.plan, expiresAt);
+
+        sendWhatsAppText(waPhone, confirmMsg).catch((err) =>
+          logger.error(err, "Failed to send subscription confirmation WhatsApp message"),
         );
       }
 

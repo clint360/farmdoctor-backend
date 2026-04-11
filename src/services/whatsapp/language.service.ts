@@ -37,7 +37,7 @@ export function askCity(language: Language): string {
   }
 }
 
-export function cityConfirmation(language: Language, city: string): string {
+export function cityConfirmation(language: Language, _city: string): string {
   switch (language) {
     case "french":
       return `Merci ! 🌱 Comment puis-je vous aider avec vos cultures ?`;
@@ -59,33 +59,67 @@ export function createSubscriptionLimitMessage(
   limit: number
 ): string {
   const visitLink = "\n\nVisit: https://farm-doctor.vercel.app/subscribe";
-  
+  const isFree = plan === "free";
+
   switch (language) {
     case "french":
       if (limitType === "messages") {
-        return `Vous avez utilisé vos ${limit} messages gratuits ce mois. Abonnez-vous pour continuer!\n\nLes plans commencent à 1 000 XAF/mois.${visitLink}`;
+        // Only free users hit a message limit
+        return `Vous avez utilisé vos ${limit} messages gratuits ce mois. 🌱\n\nAbonnez-vous pour continuer sans interruption — les plans commencent à seulement 1 000 XAF/mois.${visitLink}`;
       } else if (limitType === "images") {
-        return `Vous avez atteint votre limite mensuelle d'analyses d'images (${limit}). Mettez à niveau votre plan pour plus!${visitLink}`;
+        return isFree
+          ? `Vous avez atteint votre limite d'analyses d'images (${limit}/mois) sur le plan gratuit. 📸\n\nAbonnez-vous pour en faire plus !${visitLink}`
+          : `Vous avez atteint votre limite mensuelle d'analyses d'images (${limit}) pour votre plan *${plan}*. 📸\n\nPassez à un plan supérieur pour augmenter votre quota.${visitLink}`;
       } else {
-        return `Vous avez atteint votre limite mensuelle de voix (${limit} minutes). Mettez à niveau votre plan pour plus!${visitLink}`;
+        return isFree
+          ? `Vous avez atteint votre limite de messages vocaux (${limit} minutes) sur le plan gratuit. 🎙️\n\nAbonnez-vous pour continuer avec les messages vocaux !${visitLink}`
+          : `Vous avez atteint votre limite mensuelle de messages vocaux (${limit} minutes) pour votre plan *${plan}*. 🎙️\n\nPassez à un plan supérieur pour plus de minutes.${visitLink}`;
       }
-    
+
     case "pidgin":
       if (limitType === "messages") {
-        return `You don use your ${limit} free messages for this month. Subscribe to continue!\n\nPlans start at 1,000 XAF/month.${visitLink}`;
+        return `You don use your ${limit} free messages for dis month. 🌱\n\nSubscribe make you continue — plans start from 1,000 XAF/month only.${visitLink}`;
       } else if (limitType === "images") {
-        return `You don reach your monthly image limit (${limit}). Upgrade your plan for more!${visitLink}`;
+        return isFree
+          ? `You don reach your image limit (${limit}/month) for free plan. 📸\n\nSubscribe make you do more analysis!${visitLink}`
+          : `You don finish your monthly image limit (${limit}) for your *${plan}* plan. 📸\n\nUpgrade your plan make you get more.${visitLink}`;
       } else {
-        return `You don reach your monthly voice limit (${limit} minutes). Upgrade your plan for more!${visitLink}`;
+        return isFree
+          ? `You don reach your voice limit (${limit} minutes) for free plan. 🎙️\n\nSubscribe make you continue send voice messages!${visitLink}`
+          : `You don finish your monthly voice limit (${limit} minutes) for your *${plan}* plan. 🎙️\n\nUpgrade your plan make you get more minutes.${visitLink}`;
       }
-    
+
     default: // english
       if (limitType === "messages") {
-        return `You've used your ${limit} free messages this month. Subscribe to continue!\n\nPlans start at 1,000 XAF/month.${visitLink}`;
+        return `You've used up your ${limit} free messages this month. 🌱\n\nSubscribe to keep chatting with Farm Doctor — plans start at just 1,000 XAF/month.${visitLink}`;
       } else if (limitType === "images") {
-        return `You've reached your monthly image analysis limit (${limit}). Upgrade your plan for more!${visitLink}`;
+        return isFree
+          ? `You've reached your image analysis limit (${limit}/month) on the free plan. 📸\n\nSubscribe to analyse more crop images!${visitLink}`
+          : `You've reached your monthly image analysis limit (${limit}) on your *${plan}* plan. 📸\n\nUpgrade your plan to get a higher quota.${visitLink}`;
       } else {
-        return `You've reached your monthly voice limit (${limit} minutes). Upgrade your plan for more!${visitLink}`;
+        return isFree
+          ? `You've reached your voice message limit (${limit} minutes) on the free plan. 🎙️\n\nSubscribe to continue sending voice notes!${visitLink}`
+          : `You've reached your monthly voice limit (${limit} minutes) on your *${plan}* plan. 🎙️\n\nUpgrade your plan to get more minutes.${visitLink}`;
       }
+  }
+}
+
+export function createSubscriptionConfirmationMessage(
+  language: Language,
+  plan: string,
+  expiresAt: Date
+): string {
+  const expiry = expiresAt.toLocaleDateString(
+    language === "french" ? "fr-FR" : "en-GB",
+    { day: "numeric", month: "long", year: "numeric" }
+  );
+
+  switch (language) {
+    case "french":
+      return `✅ *Paiement reçu !* Votre plan *${plan}* est maintenant actif jusqu'au ${expiry}.\n\nMerci de soutenir Farm Doctor 🌾 Continuez à m'envoyer vos questions agricoles !`;
+    case "pidgin":
+      return `✅ *Payment don land!* Your *${plan}* plan don activate till ${expiry}.\n\nTank you for support Farm Doctor 🌾 Continue send your farm questions!`;
+    default:
+      return `✅ *Payment received!* Your *${plan}* plan is now active until ${expiry}.\n\nThank you for supporting Farm Doctor 🌾 Keep sending me your farming questions!`;
   }
 }
