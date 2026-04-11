@@ -5,16 +5,6 @@ export type TelegramLanguage = "en" | "fr" | "pidgin";
 
 const DOCTOR_PREFIX = "🧑‍🌾 Agro Doctor";
 
-const firstSentence = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  const split = trimmed
-    .split(/\.|\n/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return split[0] || trimmed;
-};
-
 const normalize = (value: string | null | undefined): string =>
   (value || "").trim();
 
@@ -63,41 +53,34 @@ const ackFor = (language?: TelegramLanguage): string => {
   return "Hmm... I hear you. Thanks for the details.";
 };
 
-const explainFor = (
-  advice: FarmingAdviceData,
-  language?: TelegramLanguage,
-): string => {
-  const crop =
-    normalize(advice.crop) || (language === "fr" ? "la plante" : "the crop");
-  const issue =
-    normalize(advice.issue) ||
-    (language === "fr" ? "un probleme" : "a problem");
-
-  if (language === "fr") {
-    return `Je pense que ${crop} a ${issue}.`;
-  }
-  if (language === "pidgin") {
-    return `E be like say ${crop} get ${issue}.`;
-  }
-  return `It looks like ${crop} has ${issue}.`;
-};
-
 const responseFor = (
   advice: FarmingAdviceData,
   language?: TelegramLanguage,
 ): string => {
   const crop =
     normalize(advice.crop) || (language === "fr" ? "la plante" : "your crop");
-  const solution = firstSentence(normalize(advice.solution)) || "";
-  const tips = firstSentence(normalize(advice.tips)) || "";
+  const issue =
+    normalize(advice.issue) ||
+    (language === "fr" ? "un problème" : "a problem");
+  const solution = normalize(advice.solution);
+  const tips = normalize(advice.tips);
 
   if (language === "fr") {
-    return `D'accord. Pour ${crop}, je vous conseille ${solution || "d'enlever les parties atteintes"}, puis ${tips || "de garder la plante propre"}.`;
+    const parts = [`Je pense que votre ${crop} a ${issue}.`];
+    if (solution) parts.push(solution);
+    if (tips) parts.push(tips);
+    return parts.join(" ");
   }
   if (language === "pidgin") {
-    return `Okay. For ${crop}, I suggest ${solution || "cut the bad part"}, then ${tips || "keep the crop clean"}.`;
+    const parts = [`E be like say your ${crop} get ${issue}.`];
+    if (solution) parts.push(solution);
+    if (tips) parts.push(tips);
+    return parts.join(" ");
   }
-  return `Okay. For ${crop}, I suggest ${solution || "remove the bad parts"}, then ${tips || "keep the crop clean"}.`;
+  const parts = [`It looks like your ${crop} has ${issue}.`];
+  if (solution) parts.push(solution);
+  if (tips) parts.push(tips);
+  return parts.join(" ");
 };
 
 export const buildDoctorMessagesFromAdvice = (
