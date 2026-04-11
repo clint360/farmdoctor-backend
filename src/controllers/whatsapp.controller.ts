@@ -19,6 +19,7 @@ import { logMessage } from "../services/whatsapp/messages.service";
 import { askCity } from "../services/whatsapp/language.service";
 import { Language } from "../services/whatsapp/gemini.service";
 import { handleExpertResponse } from "../services/whatsapp/expert-suggest.service";
+import { handleExpertClaim } from "../services/missed-call.service";
 
 // ─── Deduplication ──────────────────
 const DEDUP_TTL = 5 * 60 * 1000;
@@ -59,6 +60,14 @@ async function routeWhatsAppMessage(msg: ParsedWhatsAppMessage) {
     // If the user taps a language from the list, we handle it here
     // before the normal text/image/audio handlers.
     if (msg.type === "interactive" && msg.interactiveId) {
+      // ── Expert claim response (missed call dispatch) ──
+      if (msg.interactiveId?.startsWith("claim_yes_") || msg.interactiveId?.startsWith("claim_no_")) {
+        const accepted = msg.interactiveId.startsWith("claim_yes_");
+        const missedCallId = msg.interactiveId.replace(/^claim_(yes|no)_/, "");
+        await handleExpertClaim(msg.from, missedCallId, accepted);
+        return;
+      }
+
       // ── Expert suggestion response ──
       if (msg.interactiveId === "expert_yes" || msg.interactiveId === "expert_no") {
         const { conversation } = await getOrCreateConversation(msg.from, msg.profileName);

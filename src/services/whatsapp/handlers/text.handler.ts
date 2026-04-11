@@ -1,16 +1,14 @@
 import {
   ParsedWhatsAppMessage,
   markAsRead,
-  sendWhatsAppText,
   startTypingIndicator,
   stopTypingIndicator,
 } from "../../whatsapp.service";
-import { sendLanguageMenu } from "../../whatsapp.service";
 import { getOrCreateConversation, updateConversation } from "../memory.service";
 import { logMessage, getConversationMessages } from "../messages.service";
 import {
   detectLanguageMenuChoice,
-  welcomeMessage,
+  detectLanguageFromText,
   askCity,
   cityConfirmation,
 } from "../language.service";
@@ -58,35 +56,42 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
     wa_message_id: msg.messageId,
   });
 
-  // ── Step 1: language selection ──────
-  if (isNew || !conversation.language) {
-    const choice = detectLanguageMenuChoice(text);
-    if (!choice) {
-      // Also try sending the interactive list menu as an enhancement
-      await sendLanguageMenu(msg.from);
-      return;
-    }
+  // ── Step 1: language (silent auto-detect, never ask) ──────
+  if (!conversation.language) {
+    let choice =
+      detectLanguageMenuChoice(text) ||
+      detectLanguageFromText(text) ||
+      "english";
     await updateConversation(conversation.id, { language: choice });
-    await sendTextAndLog(msg.from, askCity(choice), conversation.id);
-    return;
+    conversation.language = choice;
   }
 
-  const lang = conversation.language as Language;
+  // Keep language in sync if user switches mid-conversation
+  const detectedLang = detectLanguageFromText(text);
+  let lang = conversation.language as Language;
+  if (detectedLang && detectedLang !== lang) {
+    lang = detectedLang;
+    await updateConversation(conversation.id, { language: lang });
+  }
 
-  // ── Step 2: city onboarding ─────────
+  // ── Step 2: city (only ask once, needed for DB) ─────────
   if (!conversation.city) {
-    const city = text.split("\n")[0].slice(0, 64).trim();
-    if (!city) {
+    if (isNew) {
+      // First message ever — ask their location
       await sendTextAndLog(msg.from, askCity(lang), conversation.id);
       return;
     }
-    await updateConversation(conversation.id, { city });
-    await sendTextAndLog(
-      msg.from,
-      cityConfirmation(lang, city),
-      conversation.id,
-    );
-    return;
+    // Second message — treat it as the city answer
+    const city = text.split("\n")[0].slice(0, 64).trim();
+    if (city) {
+      await updateConversation(conversation.id, { city });
+      await sendTextAndLog(
+        msg.from,
+        cityConfirmation(lang, city),
+        conversation.id,
+      );
+      return;
+    }
   }
 
   // ── Step 3: quota check before AI processing ──
