@@ -43,6 +43,11 @@ export type ImageDiagnosis = {
   treatment: string;
 };
 
+export type ChatResponse = {
+  special_request?: "expert" | "insight" | null;
+  reply: string;
+};
+
 // ─── System prompt ──────────────────
 const SYSTEM_PROMPT = `You are Farm Doctor — a warm and opstimistic agricultural AI assistant helping farmers across Cameroon.
 
@@ -105,14 +110,53 @@ function buildContextBlock(ctx: ConversationContext): string {
 }
 
 // ─── Chat ───────────────────────────
-export async function chat(userMessage: string, ctx: ConversationContext): Promise<string> {
+export async function chat(userMessage: string, ctx: ConversationContext): Promise<ChatResponse> {
   const hasPrior = ctx.summary || ctx.lastMessage;
   const prompt = `${buildContextBlock(ctx)}\n\n${hasPrior ? "Continue the conversation." : ""} Farmer says: ${userMessage}`;
+  
+  // Updated system prompt with special request detection
+  const updatedSystemPrompt = SYSTEM_PROMPT + `
+
+---
+
+SPECIAL REQUEST DETECTION:
+After generating your reply, also detect if the farmer is making one of these special requests:
+1. EXPERT REQUEST: User is asking to find/connect with agricultural experts, consultants, or specialists nearby. Examples: "Connect me with experts", "I need professional help", "Where are the farm advisors", "Show me experts in my area"
+2. INSIGHT REQUEST: User is asking for information/advice about crops in their specific region/location. Examples: "How to grow cassava in Bafoussam?", "What's best for this area?", "Tips for farming here", "What crops work in Douala?"
+
+Return ONLY valid JSON (no markdown, no code fences) with this exact structure:
+{\n  "specialRequest": "expert" | "insight" | null,\n  "reply": "Your full conversational response here..."\n}
+
+If the message is none of these special requests, set specialRequest to null.
+ALWAYS include the "reply" field with your normal farming advice/response.`;
+
   const result = await client().models.generateContent({
     model: getTextModel(),
-    contents: [{ role: "user", parts: [{ text: `${SYSTEM_PROMPT}\n\n${prompt}` }] }],
+    contents: [{ role: "user", parts: [{ text: `${updatedSystemPrompt}\n\n${prompt}` }] }],
   });
-  return (result.text ?? "").trim();
+  
+  const raw = (result.text ?? "").trim();
+  
+  // Parse JSON response
+  const cleaned = raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    return {
+      special_request: parsed.specialRequest || null,
+      reply: parsed.reply || (result.text ?? "").trim(),
+    };
+  } catch {
+    // Fallback: treat as normal reply if JSON parsing fails
+    return {
+      special_request: null,
+      reply: raw,
+    };
+  }
 }
 
 // ─── Vision diagnosis ───────────────

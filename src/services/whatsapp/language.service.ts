@@ -51,3 +51,41 @@ export function cityConfirmation(language: Language, city: string): string {
 export function languageUnknownFallback(): string {
   return "Please choose a language by replying 1 (English), 2 (Français), or 3 (Pidgin).";
 }
+
+export function createSubscriptionLimitMessage(
+  language: Language,
+  limitType: "messages" | "images" | "voice",
+  plan: string,
+  limit: number
+): string {
+  const visitLink = "\n\nVisit: https://farm-doctor.vercel.app/subscribe";
+  
+  switch (language) {
+    case "french":
+      if (limitType === "messages") {
+        return `Vous avez utilisé vos ${limit} messages gratuits ce mois. Abonnez-vous pour continuer!\n\nLes plans commencent à 1 000 XAF/mois.${visitLink}`;
+      } else if (limitType === "images") {
+        return `Vous avez atteint votre limite mensuelle d'analyses d'images (${limit}). Mettez à niveau votre plan pour plus!${visitLink}`;
+      } else {
+        return `Vous avez atteint votre limite mensuelle de voix (${limit} minutes). Mettez à niveau votre plan pour plus!${visitLink}`;
+      }
+    
+    case "pidgin":
+      if (limitType === "messages") {
+        return `You don use your ${limit} free messages for this month. Subscribe to continue!\n\nPlans start at 1,000 XAF/month.${visitLink}`;
+      } else if (limitType === "images") {
+        return `You don reach your monthly image limit (${limit}). Upgrade your plan for more!${visitLink}`;
+      } else {
+        return `You don reach your monthly voice limit (${limit} minutes). Upgrade your plan for more!${visitLink}`;
+      }
+    
+    default: // english
+      if (limitType === "messages") {
+        return `You've used your ${limit} free messages this month. Subscribe to continue!\n\nPlans start at 1,000 XAF/month.${visitLink}`;
+      } else if (limitType === "images") {
+        return `You've reached your monthly image analysis limit (${limit}). Upgrade your plan for more!${visitLink}`;
+      } else {
+        return `You've reached your monthly voice limit (${limit} minutes). Upgrade your plan for more!${visitLink}`;
+      }
+  }
+}
