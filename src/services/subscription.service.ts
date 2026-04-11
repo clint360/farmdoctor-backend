@@ -22,7 +22,7 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
 };
 
 const FREE_LIMITS: PlanLimits = { voice_minutes: 5, image_analyses: 3, can_access_experts: false };
-const FREE_MESSAGE_LIMIT = 10;
+const FREE_MESSAGE_LIMIT = 20;
 
 export const VALID_PLANS = ["starter", "pro", "cooperative"] as const;
 export type PlanName = (typeof VALID_PLANS)[number];

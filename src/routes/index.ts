@@ -5,7 +5,7 @@ import { handleWhatsAppVerify, handleWhatsAppWebhook } from '../controllers/what
 import { handleExpertApply, handleExpertPaymentStatus, handleGetExperts } from '../controllers/expert.controller';
 import { handleGetSubscription, handleCreateSubscription, handlePaymentStatus } from '../controllers/subscription.controller';
 import { handleCreateWebCall, handleCallEnded } from '../controllers/retell.controller';
-
+import { handleMissedCall } from '../controllers/missedCall.controller';
 /**
  * Setup all application routes
  */
@@ -32,4 +32,7 @@ export const setupRoutes = async (fastify: FastifyInstance) => {
   // Retell AI web calls
   fastify.post('/api/retell/create-web-call', handleCreateWebCall);
   fastify.post('/api/retell/call-ended', handleCallEnded);
+
+  //Missed Phone Calls
+  fastify.post('/api/missed-call', handleMissedCall);
 };

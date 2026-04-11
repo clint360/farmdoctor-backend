@@ -12,6 +12,7 @@ export const setupPlugins = fp(async (fastify: FastifyInstance) => {
     'http://localhost:3001',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
+    'http://farm-doctor.vercel.app',
     'https://farm-doctor.vercel.app',
     'https://farmdoctor-admin.vercel.app',
   ];
@@ -22,13 +23,18 @@ export const setupPlugins = fp(async (fastify: FastifyInstance) => {
       if (!origin) return cb(null, true);
       if (allowedOrigins.some((o) => origin.startsWith(o))) return cb(null, true);
       // Also allow any *.vercel.app preview deploys and ngrok
-      if (/\.(vercel\.app|ngrok-free\.dev|ngrok\.io)$/.test(new URL(origin).hostname)) {
-        return cb(null, true);
+      try {
+        const hostname = new URL(origin).hostname;
+        if (/\.(vercel\.app|ngrok-free\.dev|ngrok\.io)$/.test(hostname)) {
+          return cb(null, true);
+        }
+      } catch {
+        // malformed origin — fall through to deny
       }
       cb(null, false);
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
     credentials: true,
   });
 
