@@ -1,4 +1,10 @@
-import { ParsedWhatsAppMessage, fetchWhatsAppMedia, markAsRead, startTypingIndicator, stopTypingIndicator } from "../../whatsapp.service";
+import {
+  ParsedWhatsAppMessage,
+  fetchWhatsAppMedia,
+  markAsRead,
+  startTypingIndicator,
+  stopTypingIndicator,
+} from "../../whatsapp.service";
 import {
   getOrCreateConversation,
   updateConversation,
@@ -17,11 +23,14 @@ async function buildHistoryContext(conversationId: string) {
   const msgs = await getConversationMessages(conversationId, 20);
   if (msgs.length === 0) return { summary: null, lastMessage: null };
 
-  const lastBotMsg = [...msgs].reverse().find((m) => m.direction === "out" && m.body);
+  const lastBotMsg = [...msgs]
+    .reverse()
+    .find((m) => m.direction === "out" && m.body);
   const lastMessage = lastBotMsg?.body ?? null;
 
   const older = msgs.slice(0, -2);
-  const summary = older.length > 0 ? await gemini.summarizeHistory(older) : null;
+  const summary =
+    older.length > 0 ? await gemini.summarizeHistory(older) : null;
 
   return { summary, lastMessage };
 }
@@ -33,7 +42,7 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
 
   const { conversation, profile } = await getOrCreateConversation(
     msg.from,
-    msg.profileName
+    msg.profileName,
   );
 
   // Voice-note users implicitly prefer voice replies.
@@ -42,7 +51,12 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
   }
 
   // Quota check before expensive AI processing
-  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "voice", (conversation.language as Language) || "english");
+  const quota = await checkAndEnforceQuota(
+    msg.from,
+    conversation.id,
+    "voice",
+    (conversation.language as Language) || "english",
+  );
   if (!quota.allowed) {
     await sendTextAndLog(msg.from, quota.message!, conversation.id);
     return;
@@ -59,9 +73,16 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
     // OGG Opus (WhatsApp voice) ≈ 2 KB/s → buffer.length / 2000 = seconds
     const estimatedSeconds = Math.max(buffer.length / 2000, 1);
     const estimatedMinutes = Math.round((estimatedSeconds / 60) * 100) / 100;
-    await incrementProfileUsage(profile.id, "usage_voice_minutes", estimatedMinutes);
+    await incrementProfileUsage(
+      profile.id,
+      "usage_voice_minutes",
+      estimatedMinutes,
+    );
 
-    const { transcript, language: lang } = await gemini.transcribeAudio(buffer, mimeType);
+    const { transcript, language: lang } = await gemini.transcribeAudio(
+      buffer,
+      mimeType,
+    );
 
     await logMessage({
       conversation_id: conversation.id,
@@ -81,9 +102,21 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
       const city = transcript.split("\n")[0].slice(0, 64).trim();
       if (city) {
         await updateConversation(conversation.id, { city });
-        await sendReplyAndLog(msg.from, cityConfirmation(lang, city), lang, true, conversation.id);
+        await sendReplyAndLog(
+          msg.from,
+          cityConfirmation(lang, city),
+          lang,
+          true,
+          conversation.id,
+        );
       } else {
-        await sendReplyAndLog(msg.from, askCity(lang), lang, true, conversation.id);
+        await sendReplyAndLog(
+          msg.from,
+          askCity(lang),
+          lang,
+          true,
+          conversation.id,
+        );
       }
       return;
     }
@@ -116,15 +149,27 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
       // Add insights CTA to voice reply
       const insightsCTA =
         lang === "french"
-          ? `. Pour plus de détails, visitez farmer-hack.vercel.app/insights`
+          ? `. Pour plus de détails, visitez farm-doctor.vercel.app/insights`
           : lang === "pidgin"
-            ? `. For more details, check farmer-hack.vercel.app/insights`
-            : `. For more details, visit farmer-hack.vercel.app/insights`;
+            ? `. For more details, check farm-doctor.vercel.app/insights`
+            : `. For more details, visit farm-doctor.vercel.app/insights`;
       const replyWithCTA = chatResponse.reply + insightsCTA;
-      await sendReplyAndLog(msg.from, replyWithCTA, lang, true, conversation.id);
+      await sendReplyAndLog(
+        msg.from,
+        replyWithCTA,
+        lang,
+        true,
+        conversation.id,
+      );
     } else {
       // Normal reply
-      await sendReplyAndLog(msg.from, chatResponse.reply, lang, true, conversation.id);
+      await sendReplyAndLog(
+        msg.from,
+        chatResponse.reply,
+        lang,
+        true,
+        conversation.id,
+      );
     }
   } finally {
     stopTypingIndicator(msg.from);

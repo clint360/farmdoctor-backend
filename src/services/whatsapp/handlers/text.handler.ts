@@ -40,7 +40,7 @@ async function buildHistoryContext(conversationId: string) {
 function buildExpertListMessage(
   lang: Language,
   city: string,
-  experts: Array<{ full_name: string; phone: string }>
+  experts: Array<{ full_name: string; phone: string }>,
 ): string {
   const header =
     lang === "french"
@@ -123,7 +123,12 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
   }
 
   // ── Step 3: quota check before AI processing ──
-  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "text", lang);
+  const quota = await checkAndEnforceQuota(
+    msg.from,
+    conversation.id,
+    "text",
+    lang,
+  );
   if (!quota.allowed) {
     await sendTextAndLog(msg.from, quota.message!, conversation.id);
     return;
@@ -146,9 +151,13 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
     if (chatResponse.special_request === "expert") {
       // Route to expert listing
       const experts = await getExpertsByCity(conversation.city || "");
-      
+
       if (experts.length > 0) {
-        const expertListText = buildExpertListMessage(lang, conversation.city!, experts);
+        const expertListText = buildExpertListMessage(
+          lang,
+          conversation.city!,
+          experts,
+        );
         await sendTextAndLog(msg.from, expertListText, conversation.id);
       } else {
         const noExpertsMsg =
@@ -163,16 +172,28 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
       // Add insights tool CTA to natural reply
       const insightsCTA =
         lang === "french"
-          ? `\n\n*Pour plus de détails sur les cultures et votre région, visitez:* https://farmer-hack.vercel.app/insights`
+          ? `\n\n*Pour plus de détails sur les cultures et votre région, visitez:* https://farm-doctor.vercel.app/insights`
           : lang === "pidgin"
-            ? `\n\n*For more details about crops in your area, check:* https://farmer-hack.vercel.app/insights`
-            : `\n\nFor more detailed, location-specific crop information, check: https://farmer-hack.vercel.app/insights`;
-      
+            ? `\n\n*For more details about crops in your area, check:* https://farm-doctor.vercel.app/insights`
+            : `\n\nFor more detailed, location-specific crop information, check: https://farm-doctor.vercel.app/insights`;
+
       const replyWithCTA = chatResponse.reply + insightsCTA;
-      await sendReplyAndLog(msg.from, replyWithCTA, lang, false, conversation.id);
+      await sendReplyAndLog(
+        msg.from,
+        replyWithCTA,
+        lang,
+        false,
+        conversation.id,
+      );
     } else {
       // Normal reply
-      await sendReplyAndLog(msg.from, chatResponse.reply, lang, false, conversation.id);
+      await sendReplyAndLog(
+        msg.from,
+        chatResponse.reply,
+        lang,
+        false,
+        conversation.id,
+      );
     }
 
     // ── Step 5: maybe suggest expert (non-blocking) ──

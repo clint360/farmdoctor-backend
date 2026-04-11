@@ -3,7 +3,8 @@ import { logger } from "../../utils/logger";
 
 // ─── Config ─────────────────────────
 const getTextModel = () => process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash";
-const getVisionModel = () => process.env.GEMINI_VISION_MODEL || "gemini-2.5-flash";
+const getVisionModel = () =>
+  process.env.GEMINI_VISION_MODEL || "gemini-2.5-flash";
 const getDefaultCountry = () => process.env.DEFAULT_COUNTRY || "Cameroon";
 
 let _client: GoogleGenAI | null = null;
@@ -12,7 +13,11 @@ function client(): GoogleGenAI {
     const vertexProject = process.env.VERTEX_PROJECT_ID;
     const vertexLocation = process.env.VERTEX_LOCATION || "us-central1";
     if (vertexProject) {
-      _client = new GoogleGenAI({ vertexai: true, project: vertexProject, location: vertexLocation });
+      _client = new GoogleGenAI({
+        vertexai: true,
+        project: vertexProject,
+        location: vertexLocation,
+      });
     } else {
       _client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
     }
@@ -56,7 +61,7 @@ You genuinely care about every farmer's success. Always reply in the user's pref
 YOUR PERSONALITY:
 - Use a few encouraging phrases "Don't worry, we can figure this out!", "This is treatable!", "Your crops can recover!"
 - Never be cold, clinical, or discouraging. Even with bad diagnoses, focus on what CAN be done.
-- Keep a conversational, human tone — like a wise, friendly neighbor who studied agriculture.
+- Keep a conversational, human tone — like a wise, friendly neighbor who studied agriculture. but note that not all messages need an "Ah or don't worry" — only use them when appropriate to the situation and language."
 
 YOUR DIAGNOSTIC APPROACH:
 - When a farmer describes symptoms, give an overview of the most likely possibilities BEFORE asking follow-up questions.
@@ -82,17 +87,19 @@ YOUR RESPONSIBILITIES:
 function buildContextBlock(ctx: ConversationContext): string {
   const lines: string[] = [];
   lines.push(`User preferred language: ${ctx.language}`);
-  if (ctx.city) lines.push(`User location: ${ctx.city}, ${getDefaultCountry()}`);
+  if (ctx.city)
+    lines.push(`User location: ${ctx.city}, ${getDefaultCountry()}`);
   if (ctx.cropTypes && ctx.cropTypes.length > 0) {
     lines.push(`User grows: ${ctx.cropTypes.join(", ")}`);
   }
   if (ctx.lastCrop) lines.push(`Last crop discussed: ${ctx.lastCrop}`);
   if (ctx.lastDiagnosis) lines.push(`Last diagnosis: ${ctx.lastDiagnosis}`);
-  if (ctx.lastTreatment) lines.push(`Last treatment suggested: ${ctx.lastTreatment}`);
+  if (ctx.lastTreatment)
+    lines.push(`Last treatment suggested: ${ctx.lastTreatment}`);
   lines.push("");
   const replyLang = ctx.language === "pidgin" ? "english" : ctx.language;
   lines.push(
-    `IMPORTANT: Reply entirely in ${replyLang}. Only recommend treatments, brands, and agro-inputs available in Cameroon.`
+    `IMPORTANT: Reply entirely in ${replyLang}. Only recommend treatments, brands, and agro-inputs available in Cameroon.`,
   );
 
   if (ctx.summary) {
@@ -110,12 +117,17 @@ function buildContextBlock(ctx: ConversationContext): string {
 }
 
 // ─── Chat ───────────────────────────
-export async function chat(userMessage: string, ctx: ConversationContext): Promise<ChatResponse> {
+export async function chat(
+  userMessage: string,
+  ctx: ConversationContext,
+): Promise<ChatResponse> {
   const hasPrior = ctx.summary || ctx.lastMessage;
   const prompt = `${buildContextBlock(ctx)}\n\n${hasPrior ? "Continue the conversation." : ""} Farmer says: ${userMessage}`;
-  
+
   // Updated system prompt with special request detection
-  const updatedSystemPrompt = SYSTEM_PROMPT + `
+  const updatedSystemPrompt =
+    SYSTEM_PROMPT +
+    `
 
 ---
 
@@ -132,9 +144,14 @@ ALWAYS include the "reply" field with your normal farming advice/response.`;
 
   const result = await client().models.generateContent({
     model: getTextModel(),
-    contents: [{ role: "user", parts: [{ text: `${updatedSystemPrompt}\n\n${prompt}` }] }],
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: `${updatedSystemPrompt}\n\n${prompt}` }],
+      },
+    ],
   });
-  
+
   const raw = (result.text ?? "").trim();
 
   // Strip markdown code fences
@@ -160,7 +177,9 @@ ALWAYS include the "reply" field with your normal farming advice/response.`;
   // Fallback: extract "reply" value with regex in case newlines broke JSON.parse
   const replyMatch = cleaned.match(/"reply"\s*:\s*"([\s\S]*?)"\s*[,}]/);
   if (replyMatch) {
-    const specialMatch = cleaned.match(/"specialRequest"\s*:\s*"(expert|insight)"/);
+    const specialMatch = cleaned.match(
+      /"specialRequest"\s*:\s*"(expert|insight)"/,
+    );
     return {
       special_request: (specialMatch?.[1] as "expert" | "insight") || null,
       reply: replyMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'),
@@ -178,7 +197,7 @@ ALWAYS include the "reply" field with your normal farming advice/response.`;
 export async function diagnoseImage(
   imageBuffer: Buffer,
   mimeType: string,
-  ctx: ConversationContext
+  ctx: ConversationContext,
 ): Promise<ImageDiagnosis> {
   const imagePart = {
     inlineData: {
@@ -223,7 +242,8 @@ Be concise and practical.`;
       cropType: parsed.cropType ?? null,
       disease: parsed.disease ?? null,
       deficiency: parsed.deficiency ?? null,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : null,
+      confidence:
+        typeof parsed.confidence === "number" ? parsed.confidence : null,
       explanation: parsed.explanation ?? "",
       treatment: parsed.treatment ?? "",
     };
@@ -242,13 +262,13 @@ Be concise and practical.`;
 // ─── Explain diagnosis to farmer ────
 export async function explainDiagnosisToFarmer(
   diagnosis: ImageDiagnosis,
-  ctx: ConversationContext
+  ctx: ConversationContext,
 ): Promise<string> {
   if (diagnosis.explanation && diagnosis.treatment) {
     const header =
       diagnosis.cropType && diagnosis.disease
         ? `${diagnosis.cropType} — ${diagnosis.disease}`
-        : diagnosis.cropType ?? "";
+        : (diagnosis.cropType ?? "");
     return [header, diagnosis.explanation, "", diagnosis.treatment]
       .filter(Boolean)
       .join("\n");
@@ -271,7 +291,7 @@ ${JSON.stringify(diagnosis)}`;
 
 // ─── Summarise conversation history ─
 export async function summarizeHistory(
-  messages: Array<{ direction: "in" | "out"; body: string | null }>
+  messages: Array<{ direction: "in" | "out"; body: string | null }>,
 ): Promise<string> {
   const lines = messages
     .filter((m) => m.body)
@@ -283,7 +303,16 @@ export async function summarizeHistory(
   try {
     const result = await client().models.generateContent({
       model: getTextModel(),
-      contents: [{ role: "user", parts: [{ text: `Summarise the following farmer–bot conversation in 2–4 sentences. Focus on: what crop/problem was discussed, what advice was given, and any pending questions. Be factual and concise. No greetings.\n\n${lines}` }] }],
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: `Summarise the following farmer–bot conversation in 2–4 sentences. Focus on: what crop/problem was discussed, what advice was given, and any pending questions. Be factual and concise. No greetings.\n\n${lines}`,
+            },
+          ],
+        },
+      ],
     });
     return (result.text ?? "").trim();
   } catch (err) {
@@ -330,15 +359,25 @@ TEXT: <transcription>`;
 
 export async function transcribeAudio(
   audioBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
 ): Promise<{ transcript: string; language: Language }> {
   try {
     const result = await client().models.generateContent({
       model: getTextModel(),
-      contents: [{ role: "user", parts: [
-        { inlineData: { mimeType: mimeType || "audio/ogg", data: audioBuffer.toString("base64") } },
-        { text: TRANSCRIBE_PROMPT },
-      ] }],
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType || "audio/ogg",
+                data: audioBuffer.toString("base64"),
+              },
+            },
+            { text: TRANSCRIBE_PROMPT },
+          ],
+        },
+      ],
     });
 
     const raw = (result.text ?? "").trim();
@@ -347,14 +386,18 @@ export async function transcribeAudio(
     const langMatch = raw.match(/^LANG:\s*(\w+)/im);
     const textMatch = raw.match(/^TEXT:\s*(.+)/ims);
 
-    const detectedLang = (langMatch?.[1] ?? "english").toLowerCase().replace(/[^a-z]/g, "");
+    const detectedLang = (langMatch?.[1] ?? "english")
+      .toLowerCase()
+      .replace(/[^a-z]/g, "");
     const transcript = (textMatch?.[1] ?? raw).trim();
 
     let language: Language = "english";
     if (detectedLang === "pidgin") language = "pidgin";
     else if (detectedLang === "french") language = "french";
 
-    logger.info(`[transcribeAudio] lang=${language} | transcript="${transcript.slice(0, 100)}…"`);
+    logger.info(
+      `[transcribeAudio] lang=${language} | transcript="${transcript.slice(0, 100)}…"`,
+    );
     return { transcript, language };
   } catch (err) {
     logger.error(err, "Gemini audio transcription failed");
