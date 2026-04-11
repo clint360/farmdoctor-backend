@@ -3,9 +3,13 @@ import OpenAI from "openai";
 import { spawn } from "node:child_process";
 import { logger } from "../../utils/logger";
 
-const ttsClient = new textToSpeech.TextToSpeechClient();
+const ttsClient = new textToSpeech.TextToSpeechClient(
+  process.env.GOOGLE_CREDENTIALS_JSON
+    ? { credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON) }
+    : {},
+);
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
-const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "tts-1";
 const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "alloy";
 const openAiClient = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
