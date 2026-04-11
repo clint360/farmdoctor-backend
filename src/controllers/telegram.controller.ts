@@ -57,16 +57,30 @@ async function withTyping(
   }
 }
 
+
+// ─── Build display name from Telegram user ────────────
+function buildDisplayName(from?: { first_name?: string; last_name?: string; username?: string }): string | undefined {
+  if (!from) return undefined;
+  const full = [from.first_name, from.last_name].filter(Boolean).join(" ").trim();
+  return full || from.username || undefined;
+}
+
 // ─── Text ─────────────────────────────────────────────
 
-async function handleText(chatId: number, text: string): Promise<void> {
+async function handleText(chatId: number, text: string, name?: string): Promise<void> {
   const phone = `tg_${chatId}`;
   const { conversation, profile } = await getOrCreateConversationForPlatform(
     phone,
     "telegram",
+    name,
   );
 
   await logMessage({ conversation_id: conversation.id, direction: "in", type: "text", body: text });
+
+  // Keep name in sync
+  if (name && name !== conversation.name) {
+    await updateConversation(conversation.id, { name });
+  }
 
   // Auto-detect language silently, never ask
   if (!conversation.language) {
@@ -101,9 +115,9 @@ async function handleText(chatId: number, text: string): Promise<void> {
 
 // ─── Image ────────────────────────────────────────────
 
-async function handleImage(chatId: number, fileId: string): Promise<void> {
+async function handleImage(chatId: number, fileId: string, name?: string): Promise<void> {
   const phone = `tg_${chatId}`;
-  const { conversation, profile } = await getOrCreateConversationForPlatform(phone, "telegram");
+  const { conversation, profile } = await getOrCreateConversationForPlatform(phone, "telegram", name);
 
   if (!conversation.language) {
     await updateConversation(conversation.id, { language: "english" });
@@ -146,9 +160,9 @@ async function handleImage(chatId: number, fileId: string): Promise<void> {
 
 // ─── Voice ────────────────────────────────────────────
 
-async function handleVoice(chatId: number, fileId: string): Promise<void> {
+async function handleVoice(chatId: number, fileId: string, name?: string): Promise<void> {
   const phone = `tg_${chatId}`;
-  const { conversation, profile } = await getOrCreateConversationForPlatform(phone, "telegram");
+  const { conversation, profile } = await getOrCreateConversationForPlatform(phone, "telegram", name);
 
   if (!profile.prefers_voice) {
     await updateProfile(profile.id, { prefers_voice: true });
@@ -232,13 +246,14 @@ const routeFarmerWebhook = async (update: TelegramUpdate): Promise<void> => {
 
   if (!update.message) return;
 
-  const { chat, text, photo, voice } = update.message;
+  const { chat, text, photo, voice, from: msgFrom } = update.message;
   const chatId = chat.id;
+  const displayName = buildDisplayName(msgFrom);
 
   try {
     if (text === "/start" || text === "/settings") {
       const phone = `tg_${chatId}`;
-      const { conversation } = await getOrCreateConversationForPlatform(phone, "telegram");
+      const { conversation } = await getOrCreateConversationForPlatform(phone, "telegram", displayName);
       await updateConversation(conversation.id, { language: null, city: null });
       await sendMessage(
         chatId,
@@ -247,9 +262,9 @@ const routeFarmerWebhook = async (update: TelegramUpdate): Promise<void> => {
       return;
     }
 
-    if (text) { await handleText(chatId, text); return; }
-    if (photo) { await handleImage(chatId, photo[photo.length - 1].file_id); return; }
-    if (voice) { await handleVoice(chatId, voice.file_id); return; }
+    if (text) { await handleText(chatId, text, displayName); return; }
+    if (photo) { await handleImage(chatId, photo[photo.length - 1].file_id, displayName); return; }
+    if (voice) { await handleVoice(chatId, voice.file_id, displayName); return; }
 
     await sendMessage(chatId, ("I understand text messages, crop photos, and voice notes. What's going on with your farm?"));
   } catch (err) {
