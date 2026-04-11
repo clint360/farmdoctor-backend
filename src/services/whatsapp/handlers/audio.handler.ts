@@ -7,10 +7,11 @@ import {
 } from "../memory.service";
 import { logMessage, getConversationMessages } from "../messages.service";
 import * as gemini from "../gemini.service";
-import { Language } from "../gemini.service";
+import { Language, type ChatResponse } from "../gemini.service";
 import { sendReplyAndLog, sendTextAndLog } from "../send.service";
 import { askCity, cityConfirmation } from "../language.service";
 import { checkAndEnforceQuota } from "../../subscription.service";
+import { getExpertsByCity } from "../../expert.service";
 
 async function buildHistoryContext(conversationId: string) {
   const msgs = await getConversationMessages(conversationId, 20);
@@ -41,7 +42,7 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
   }
 
   // Quota check before expensive AI processing
-  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "voice");
+  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "voice", (conversation.language as Language) || "english");
   if (!quota.allowed) {
     await sendTextAndLog(msg.from, quota.message!, conversation.id);
     return;
@@ -89,7 +90,7 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
 
     // 4. Gemini chat — always reply with voice (isCurrentMessageVoice = true).
     const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-    const reply = await gemini.chat(transcript, {
+    const chatResponse = await gemini.chat(transcript, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,
@@ -98,7 +99,33 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
       lastMessage,
     });
 
-    await sendReplyAndLog(msg.from, reply, lang, true, conversation.id);
+    // Handle special requests for audio — send insight link in text, or forward expert request
+    if (chatResponse.special_request === "expert") {
+      // For audio, acknowledge and offer expert help in text
+      const experts = await getExpertsByCity(conversation.city || "");
+      if (experts.length > 0) {
+        const expertMsg =
+          lang === "french"
+            ? `Pour les experts, envoyez un message texte et je vous donnerai la liste.`
+            : lang === "pidgin"
+              ? `For expert help, send text message and I go give you the list.`
+              : `To connect with experts, send a text message and I'll provide a list.`;
+        await sendReplyAndLog(msg.from, expertMsg, lang, true, conversation.id);
+      }
+    } else if (chatResponse.special_request === "insight") {
+      // Add insights CTA to voice reply
+      const insightsCTA =
+        lang === "french"
+          ? `. Pour plus de détails, visitez farmer-hack.vercel.app/insights`
+          : lang === "pidgin"
+            ? `. For more details, check farmer-hack.vercel.app/insights`
+            : `. For more details, visit farmer-hack.vercel.app/insights`;
+      const replyWithCTA = chatResponse.reply + insightsCTA;
+      await sendReplyAndLog(msg.from, replyWithCTA, lang, true, conversation.id);
+    } else {
+      // Normal reply
+      await sendReplyAndLog(msg.from, chatResponse.reply, lang, true, conversation.id);
+    }
   } finally {
     stopTypingIndicator(msg.from);
   }

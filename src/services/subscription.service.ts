@@ -1,6 +1,8 @@
 import { supabase } from "./db/supabase.service";
 import { logger } from "../utils/logger";
 import { initDirectPay, getPaymentStatus, FapshiStatus } from "./fapshi.service";
+import { createSubscriptionLimitMessage } from "./whatsapp/language.service";
+import { Language } from "./whatsapp/gemini.service";
 
 // ─── Plan definitions ───────────────
 export interface PlanLimits {
@@ -36,8 +38,7 @@ export interface QuotaCheckResult {
 export async function checkAndEnforceQuota(
   phone: string,
   conversationId: string,
-  messageType: "text" | "voice" | "image",
-): Promise<QuotaCheckResult> {
+  messageType: "text" | "voice" | "image",  language: Language = "english"): Promise<QuotaCheckResult> {
   try {
     const { data: sub } = await supabase
       .from("subscriptions")
@@ -66,7 +67,7 @@ export async function checkAndEnforceQuota(
       if ((messageCount || 0) > FREE_MESSAGE_LIMIT) {
         return {
           allowed: false,
-          message: `You've used your ${FREE_MESSAGE_LIMIT} free messages this month. Subscribe to continue!\n\nPlans start at 1,000 XAF/month.\nVisit: https://farm-doctor.vercel.app/subscribe`,
+          message: createSubscriptionLimitMessage(language, "messages", "free", FREE_MESSAGE_LIMIT),
         };
       }
     }
@@ -84,7 +85,7 @@ export async function checkAndEnforceQuota(
       if ((imageCount || 0) >= limits.image_analyses) {
         return {
           allowed: false,
-          message: `You've reached your monthly image analysis limit (${limits.image_analyses}). Upgrade your plan for more!\nVisit: https://farm-doctor.vercel.app/subscribe`,
+          message: createSubscriptionLimitMessage(language, "images", plan, limits.image_analyses),
         };
       }
     }
@@ -104,7 +105,7 @@ export async function checkAndEnforceQuota(
       if (estimatedMinutes >= limits.voice_minutes) {
         return {
           allowed: false,
-          message: `You've reached your monthly voice limit (${limits.voice_minutes} minutes). Upgrade your plan for more!\nVisit: https://farm-doctor.vercel.app/subscribe`,
+          message: createSubscriptionLimitMessage(language, "voice", plan, limits.voice_minutes),
         };
       }
     }
