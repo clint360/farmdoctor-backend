@@ -81,20 +81,20 @@ async function notifyExperts(
     const msg = [
       "🚨 *Emergency Expert Help Needed*",
       "",
-      `A farmer needs urgent assistance!`,
+      `A farmer needs urgent assistance!\n`,
       "",
       `📞 *Farmer:* ${farmerPhone}`,
-      city ? `📍 *Location:* ${city}` : "",
+      city ? `📍 *Location:* ${city}\n` : "\n",
       "",
-      `You are being contacted because you are a verified Farm Doctor expert${city ? ` near *${city}*` : ""}.`,
+      `You are being contacted because you are a verified Farm Doctor expert${city ? ` near *${city}*` : ""}. \n`,
       "",
-      "_Please respond quickly — the farmer is waiting._",
+      "_Please contact the farmer and reach an agreement and respond quickly, because — the farmer is waiting._",
     ].filter(Boolean).join("\n");
 
     try {
       await sendWhatsAppButtons(expert.phone, msg, [
-        { id: `claim_yes_${missedCallId}`, title: "🤝 I'll Help" },
-        { id: `claim_no_${missedCallId}`, title: "❌ Not Available" },
+        { id: `claim_yes_${missedCallId}`, title: "🤝 Works for me" },
+        { id: `claim_no_${missedCallId}`, title: "❌ Doesn't work for me" },
       ]);
       logger.info({ expertPhone: expert.phone, missedCallId }, "Expert notified for missed call");
     } catch (err) {
