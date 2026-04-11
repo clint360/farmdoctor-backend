@@ -1,6 +1,10 @@
 import { supabase } from "./db/supabase.service";
 import { logger } from "../utils/logger";
-import { initDirectPay, getPaymentStatus, FapshiStatus } from "./fapshi.service";
+import {
+  initDirectPay,
+  getPaymentStatus,
+  FapshiStatus,
+} from "./fapshi.service";
 import { createSubscriptionLimitMessage } from "./whatsapp/language.service";
 import { Language } from "./whatsapp/gemini.service";
 
@@ -20,10 +24,18 @@ export const PLAN_PRICES: Record<string, number> = {
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
   starter: { voice_minutes: 12, image_analyses: 10, can_access_experts: false },
   pro: { voice_minutes: 60, image_analyses: 30, can_access_experts: true },
-  cooperative: { voice_minutes: 300, image_analyses: 50, can_access_experts: true },
+  cooperative: {
+    voice_minutes: 300,
+    image_analyses: 50,
+    can_access_experts: true,
+  },
 };
 
-const FREE_LIMITS: PlanLimits = { voice_minutes: 5, image_analyses: 3, can_access_experts: false };
+const FREE_LIMITS: PlanLimits = {
+  voice_minutes: 5,
+  image_analyses: 3,
+  can_access_experts: false,
+};
 const FREE_MESSAGE_LIMIT = 20;
 
 export const VALID_PLANS = ["starter", "pro", "cooperative"] as const;
@@ -38,12 +50,14 @@ export interface QuotaCheckResult {
 export async function checkAndEnforceQuota(
   phone: string,
   conversationId: string,
-  messageType: "text" | "voice" | "image",  language: Language = "english"): Promise<QuotaCheckResult> {
+  messageType: "text" | "voice" | "image",
+  language: Language = "english",
+): Promise<QuotaCheckResult> {
   try {
     const { data: sub } = await supabase
       .from("subscriptions")
       .select("*")
-      .eq("phone", phone)
+      .eq("phone", normalizePhone(phone))
       .eq("status", "active")
       .gte("expires_at", new Date().toISOString())
       .maybeSingle();
@@ -67,7 +81,12 @@ export async function checkAndEnforceQuota(
       if ((messageCount || 0) > FREE_MESSAGE_LIMIT) {
         return {
           allowed: false,
-          message: createSubscriptionLimitMessage(language, "messages", "free", FREE_MESSAGE_LIMIT),
+          message: createSubscriptionLimitMessage(
+            language,
+            "messages",
+            "free",
+            FREE_MESSAGE_LIMIT,
+          ),
         };
       }
     }
@@ -85,7 +104,12 @@ export async function checkAndEnforceQuota(
       if ((imageCount || 0) >= limits.image_analyses) {
         return {
           allowed: false,
-          message: createSubscriptionLimitMessage(language, "images", plan, limits.image_analyses),
+          message: createSubscriptionLimitMessage(
+            language,
+            "images",
+            plan,
+            limits.image_analyses,
+          ),
         };
       }
     }
@@ -105,7 +129,12 @@ export async function checkAndEnforceQuota(
       if (estimatedMinutes >= limits.voice_minutes) {
         return {
           allowed: false,
-          message: createSubscriptionLimitMessage(language, "voice", plan, limits.voice_minutes),
+          message: createSubscriptionLimitMessage(
+            language,
+            "voice",
+            plan,
+            limits.voice_minutes,
+          ),
         };
       }
     }
@@ -117,12 +146,18 @@ export async function checkAndEnforceQuota(
   }
 }
 
+// Normalize to local format (no country code) so lookups match DB
+// e.g. +237674043490 → 674043490, 237674043490 → 674043490
+function normalizePhone(phone: string): string {
+  return phone.replace(/^\+?237/, "");
+}
+
 // ─── Get subscription ───────────────
 export async function getSubscription(phone: string) {
   const { data } = await supabase
     .from("subscriptions")
     .select("*")
-    .eq("phone", phone)
+    .eq("phone", normalizePhone(phone))
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -144,7 +179,11 @@ export async function initiateSubscriptionPayment(params: {
 
     // Check for existing active subscription — prevent double-subscribe
     const existing = await getSubscription(params.phone);
-    if (existing && existing.status === "active" && new Date(existing.expires_at) > new Date()) {
+    if (
+      existing &&
+      existing.status === "active" &&
+      new Date(existing.expires_at) > new Date()
+    ) {
       const currentPlanIndex = VALID_PLANS.indexOf(existing.plan as PlanName);
       const newPlanIndex = VALID_PLANS.indexOf(params.plan);
       if (newPlanIndex <= currentPlanIndex) {
@@ -184,11 +223,15 @@ export async function initiateSubscriptionPayment(params: {
     return {
       success: true,
       transId: fapshiResult.transId,
-      message: "Payment request sent to your phone. Please confirm on your device.",
+      message:
+        "Payment request sent to your phone. Please confirm on your device.",
     };
   } catch (error) {
     logger.error(error, "Error initiating subscription payment");
-    return { success: false, message: "Failed to initiate payment. Please try again." };
+    return {
+      success: false,
+      message: "Failed to initiate payment. Please try again.",
+    };
   }
 }
 
@@ -263,6 +306,10 @@ export async function checkPaymentAndActivate(transId: string): Promise<{
     };
   } catch (error) {
     logger.error(error, "Error checking payment status");
-    return { status: "FAILED" as FapshiStatus, activated: false, message: "Error checking payment. Please try again." };
+    return {
+      status: "FAILED" as FapshiStatus,
+      activated: false,
+      message: "Error checking payment. Please try again.",
+    };
   }
 }

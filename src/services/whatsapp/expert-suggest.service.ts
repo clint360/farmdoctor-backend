@@ -1,8 +1,6 @@
 import { getExpertsByCity } from "../expert.service";
 import { getSubscription, PLAN_LIMITS, PlanLimits } from "../subscription.service";
-import { sendWhatsAppButtons } from "../whatsapp.service";
 import { sendTextAndLog } from "./send.service";
-import { logMessage } from "./messages.service";
 import { Language } from "./gemini.service";
 import { logger } from "../../utils/logger";
 
@@ -67,17 +65,6 @@ function noExpertsText(lang: Language, city: string): string {
   }
 }
 
-function buttonLabels(lang: Language): { yes: string; no: string } {
-  switch (lang) {
-    case "french":
-      return { yes: "Oui, merci", no: "Non merci" };
-    case "pidgin":
-      return { yes: "Yes abeg", no: "No, I dey ok" };
-    default:
-      return { yes: "Yes please", no: "No thanks" };
-  }
-}
-
 // ─── Main: maybe offer expert help ──
 export async function maybeSuggestExpert(
   phone: string,
@@ -109,19 +96,8 @@ export async function maybeSuggestExpert(
     // Mark cooldown BEFORE sending (prevents race condition on double-send)
     lastSuggested.set(conversationId, Date.now());
 
-    // Send interactive buttons
-    const labels = buttonLabels(language);
-    await sendWhatsAppButtons(phone, expertOfferText(language, city), [
-      { id: "expert_yes", title: labels.yes },
-      { id: "expert_no", title: labels.no },
-    ]);
-
-    await logMessage({
-      conversation_id: conversationId,
-      direction: "out",
-      type: "text",
-      body: expertOfferText(language, city),
-    });
+    const message = expertOfferText(language, city);
+    await sendTextAndLog(phone, message, conversationId);
   } catch (err) {
     // Non-critical — never break the main flow
     logger.error(err, "maybeSuggestExpert failed");
