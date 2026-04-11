@@ -6,6 +6,7 @@ import { handleExpertApply, handleExpertPaymentStatus, handleGetExperts } from '
 import { handleGetSubscription, handleCreateSubscription, handlePaymentStatus } from '../controllers/subscription.controller';
 import { handleCreateWebCall, handleCallEnded } from '../controllers/retell.controller';
 import { handleMissedCall } from '../controllers/missedCall.controller';
+import { handleInsightsSearch, handleInsightsSuggestions } from '../controllers/insights.controller';
 /**
  * Setup all application routes
  */
@@ -35,4 +36,8 @@ export const setupRoutes = async (fastify: FastifyInstance) => {
 
   //Missed Phone Calls
   fastify.post('/api/missed-call', handleMissedCall);
+
+  // Agricultural Insights (public)
+  fastify.get('/api/insights/search', handleInsightsSearch);
+  fastify.get('/api/insights/suggestions', handleInsightsSuggestions);
 };
