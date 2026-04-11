@@ -149,9 +149,11 @@ export const ttsService = {
         try {
           wavBuffer = await synthesizeOpenAiWav(normalizedText);
           return await convertWavToOggOpus(wavBuffer);
-        } catch (error) {
-          logger.warn(error, "OpenAI TTS failed, falling back to Google TTS");
+        } catch (error: any) {
+          logger.warn({ message: error?.message, status: error?.status, code: error?.code }, "OpenAI TTS failed, falling back to Google TTS");
         }
+      } else {
+        logger.info("OpenAI TTS skipped: OPENAI_API_KEY not set");
       }
 
       try {

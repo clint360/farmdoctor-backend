@@ -130,9 +130,11 @@ const generateWithFallback = async (
           imagePart?.inlineData,
         ),
       );
-    } catch (vertexError) {
-      logger.warn(vertexError, "Vertex AI failed, trying API key fallback");
+    } catch (vertexError: any) {
+      logger.warn({ message: vertexError?.message, status: vertexError?.status, code: vertexError?.code }, "Vertex AI failed, trying API key fallback");
     }
+  } else {
+    logger.info("Vertex AI skipped: VERTEX_PROJECT_ID not set");
   }
 
   // Fall back to API key
@@ -147,12 +149,15 @@ const generateWithFallback = async (
           imagePart?.inlineData,
         ),
       );
-    } catch (error) {
-      logger.warn(error, "Gemini API key failed, trying OpenAI fallback");
+    } catch (error: any) {
+      logger.warn({ message: error?.message, status: error?.status, code: error?.code }, "Gemini API key failed, trying OpenAI fallback");
     }
+  } else {
+    logger.info("Gemini API key skipped: GEMINI_API_KEY not set");
   }
 
   // Final fallback: OpenAI
+  logger.info({ model: imagePart ? openAiVisionModel : openAiTextModel }, "Attempting OpenAI fallback");
   return await generateWithOpenAI(
     prompt,
     imagePart?.inlineData,
