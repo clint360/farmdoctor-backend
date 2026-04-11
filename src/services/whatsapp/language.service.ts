@@ -27,11 +27,11 @@ export function detectLanguageFromText(text: string): Language | null {
 export function askCity(language: Language): string {
   switch (language) {
     case "french":
-      return "Parfait, je vais vous répondre en français 🌱\n\nDans quelle ville cultivez-vous ?";
+      return "Bienvenue sur Farm Doctor ! 🌱 Je suis votre assistant agricole IA.\n\nDans quelle ville cultivez-vous ?";
     case "pidgin":
-      return "Sharp! A go di tok pidgin with you 🌱\n\nWhich city you dey farm from?";
+      return "Welcome to Farm Doctor! 🌱 A be your AI farm helper.\n\nWhich city you dey farm from?";
     default:
-      return "Great, I'll reply in English 🌱\n\nWhich city are you farming from?";
+      return "Welcome to Farm Doctor! 🌱 I'm your AI farming assistant.\n\nWhich city are you farming from?";
   }
 }
 
