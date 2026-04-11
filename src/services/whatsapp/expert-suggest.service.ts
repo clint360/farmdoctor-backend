@@ -59,11 +59,11 @@ function expertListText(
 function noExpertsText(lang: Language, city: string): string {
   switch (lang) {
     case "french":
-      return `Désolé, aucun expert n'est disponible près de ${city} pour le moment. Nous travaillons à en ajouter !`;
+      return `Désolé, aucun expert n'est disponible près de votre champ pour le moment. Nous travaillons à en ajouter !`;
     case "pidgin":
-      return `Sorry, no expert dey for ${city} now now. We dey work to add some!`;
+      return `Sorry, no expert dey for your corner farm now. We dey work to add some!`;
     default:
-      return `Sorry, no experts are available near ${city} at the moment. We're working on adding more!`;
+      return `Sorry, no experts are available near your farm at the moment. We're working on adding more!`;
   }
 }
 

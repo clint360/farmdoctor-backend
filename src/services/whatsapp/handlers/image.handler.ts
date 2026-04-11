@@ -52,7 +52,7 @@ export async function handleImage(msg: ParsedWhatsAppMessage): Promise<void> {
   }
 
   // Quota check before expensive AI processing
-  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "image");
+  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "image", lang);
   if (!quota.allowed) {
     await sendTextAndLog(msg.from, quota.message!, conversation.id);
     return;

@@ -11,10 +11,11 @@ import {
   cityConfirmation,
 } from "../language.service";
 import * as gemini from "../gemini.service";
-import { Language } from "../gemini.service";
+import { Language, type ChatResponse } from "../gemini.service";
 import { sendTextAndLog, sendReplyAndLog } from "../send.service";
 import { checkAndEnforceQuota } from "../../subscription.service";
 import { maybeSuggestExpert } from "../expert-suggest.service";
+import { getExpertsByCity } from "../../expert.service";
 
 async function buildHistoryContext(conversationId: string) {
   const msgs = await getConversationMessages(conversationId, 20);
@@ -29,6 +30,33 @@ async function buildHistoryContext(conversationId: string) {
   const summary = older.length > 0 ? await gemini.summarizeHistory(older) : null;
 
   return { summary, lastMessage };
+}
+
+function buildExpertListMessage(
+  lang: Language,
+  city: string,
+  experts: Array<{ full_name: string; phone: string }>
+): string {
+  const header =
+    lang === "french"
+      ? `🌾 *Experts Agricoles près de ${city}:*`
+      : lang === "pidgin"
+        ? `🌾 *Farm Experts for ${city}:*`
+        : `🌾 *Agricultural Experts near ${city}:*`;
+
+  const list = experts
+    .slice(0, 5)
+    .map((e, i) => `${i + 1}. *${e.full_name}*\n   📞 ${e.phone}`)
+    .join("\n\n");
+
+  const footer =
+    lang === "french"
+      ? "Contactez-les directement pour une aide professionnelle !"
+      : lang === "pidgin"
+        ? "Call dem direct for help!"
+        : "Contact them directly for professional farm help!";
+
+  return `${header}\n\n${list}\n\n${footer}`;
 }
 
 export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
@@ -83,7 +111,7 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
   }
 
   // ── Step 3: quota check before AI processing ──
-  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "text");
+  const quota = await checkAndEnforceQuota(msg.from, conversation.id, "text", lang);
   if (!quota.allowed) {
     await sendTextAndLog(msg.from, quota.message!, conversation.id);
     return;
@@ -93,7 +121,7 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
   startTypingIndicator(msg.from);
   try {
     const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-    const reply = await gemini.chat(text, {
+    const chatResponse = await gemini.chat(text, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,
@@ -102,7 +130,38 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
       lastMessage,
     });
 
-    await sendReplyAndLog(msg.from, reply, lang, false, conversation.id);
+    // Handle special requests
+    if (chatResponse.special_request === "expert") {
+      // Route to expert listing
+      const experts = await getExpertsByCity(conversation.city || "");
+      
+      if (experts.length > 0) {
+        const expertListText = buildExpertListMessage(lang, conversation.city!, experts);
+        await sendTextAndLog(msg.from, expertListText, conversation.id);
+      } else {
+        const noExpertsMsg =
+          lang === "french"
+            ? `Désolé, aucun expert disponible près de ${conversation.city} pour le moment. Nous travaillons à en ajouter !`
+            : lang === "pidgin"
+              ? `Sorry, no expert dey for ${conversation.city} now now. We dey work to add some!`
+              : `Sorry, no experts available near ${conversation.city} right now. We're working on adding more!`;
+        await sendTextAndLog(msg.from, noExpertsMsg, conversation.id);
+      }
+    } else if (chatResponse.special_request === "insight") {
+      // Add insights tool CTA to natural reply
+      const insightsCTA =
+        lang === "french"
+          ? `\n\n*Pour plus de détails sur les cultures et votre région, visitez:* https://farmer-hack.vercel.app/insights`
+          : lang === "pidgin"
+            ? `\n\n*For more details about crops in your area, check:* https://farmer-hack.vercel.app/insights`
+            : `\n\nFor more detailed, location-specific crop information, check: https://farmer-hack.vercel.app/insights`;
+      
+      const replyWithCTA = chatResponse.reply + insightsCTA;
+      await sendReplyAndLog(msg.from, replyWithCTA, lang, false, conversation.id);
+    } else {
+      // Normal reply
+      await sendReplyAndLog(msg.from, chatResponse.reply, lang, false, conversation.id);
+    }
 
     // ── Step 5: maybe suggest expert (non-blocking) ──
     await maybeSuggestExpert(msg.from, conversation.id, conversation.city, lang);
