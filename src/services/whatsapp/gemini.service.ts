@@ -303,11 +303,24 @@ export async function transcribeAudio(
   }
 }
 
-// ─── Translate to Pidgin ────────────
+// ─── Translate to Cameroon Pidgin ───
 export async function translateToPidgin(text: string): Promise<string> {
+  const prompt = `You are a native Cameroon Pidgin English (Kamtok) speaker.
+
+Translate the following text into natural spoken Cameroon Pidgin English (Kamtok) — the kind farmers in Cameroon actually speak.
+
+Rules:
+- Use authentic Cameroonian Pidgin vocabulary: "wetin" (what), "dey" (is/are/progressive), "sabi" (know), "chop" (eat), "waka" (go), "abeg" (please), "no wahala" (no problem), "e don" (it has), "make you" (you should), "e be like say" (it seems), "pikin" (small/child), "plenty" (many), "small small" (gradually), "sharp sharp" (quickly), "na" (it is), "dem" (they/them), "di" (the/progressive), "kontri" (country/village), "masa" (sir/boss)
+- Keep it SHORT and conversational — like talking to a friend
+- Do NOT use formal English
+- Return ONLY the Pidgin translation, nothing else
+
+Text:
+${text}`;
+
   const result = await client().models.generateContent({
     model: getTextModel(),
-    contents: [{ role: "user", parts: [{ text: `Translate the following agricultural advice into natural Cameroon Pidgin English. Keep it friendly, simple, and conversational. Return ONLY the translated text, no explanations or labels.\n\n${text}` }] }],
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
   });
   return (result.text ?? "").trim();
 }
