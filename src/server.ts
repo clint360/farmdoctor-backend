@@ -1,5 +1,22 @@
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { buildApp } from "./app";
 import { registerWebhook, registerCommands } from "./services/telegram.service";
+
+// If GOOGLE_APPLICATION_CREDENTIALS contains JSON content (not a file path),
+// write it to a temp file so the Google SDK can read it correctly.
+const googleCreds = process.env.GOOGLE_APPLICATION_CREDENTIALS ?? "";
+if (googleCreds.trimStart().startsWith("{")) {
+  try {
+    const tmpPath = path.join(os.tmpdir(), "google-credentials.json");
+    fs.writeFileSync(tmpPath, googleCreds, "utf8");
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
+    console.log("[startup] Google credentials written to temp file:", tmpPath);
+  } catch (err) {
+    console.error("[startup] Failed to write Google credentials:", err);
+  }
+}
 
 const startServer = async () => {
   try {

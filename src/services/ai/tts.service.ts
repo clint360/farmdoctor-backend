@@ -3,11 +3,7 @@ import OpenAI from "openai";
 import { spawn } from "node:child_process";
 import { logger } from "../../utils/logger";
 
-const ttsClient = new textToSpeech.TextToSpeechClient(
-  process.env.GOOGLE_CREDENTIALS_JSON
-    ? { credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON) }
-    : {},
-);
+const ttsClient = new textToSpeech.TextToSpeechClient();
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "tts-1";
 const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "alloy";
