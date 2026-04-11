@@ -4,12 +4,21 @@ import { spawn } from "node:child_process";
 import { logger } from "../../utils/logger";
 
 const ttsClient = new textToSpeech.TextToSpeechClient();
-const openAiApiKey = process.env.OPENAI_API_KEY || "";
-const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "tts-1";
-const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "alloy";
-const openAiTtsVoiceMale = process.env.OPENAI_TTS_VOICE_MALE;
-const openAiTtsVoiceFemale = process.env.OPENAI_TTS_VOICE_FEMALE;
-const openAiClient = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
+
+// Use getter functions so env vars are read at call time, not at module load time
+const getOpenAiApiKey = () => process.env.OPENAI_API_KEY || "";
+const getOpenAiTtsModel = () => process.env.OPENAI_TTS_MODEL || "tts-1";
+const getOpenAiTtsVoice = () => process.env.OPENAI_TTS_VOICE || "alloy";
+const getOpenAiTtsVoiceMale = () => process.env.OPENAI_TTS_VOICE_MALE;
+const getOpenAiTtsVoiceFemale = () => process.env.OPENAI_TTS_VOICE_FEMALE;
+
+let _openAiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI | null {
+  const key = getOpenAiApiKey();
+  if (!key) return null;
+  if (!_openAiClient) _openAiClient = new OpenAI({ apiKey: key });
+  return _openAiClient;
+}
 
 const simplifyPidginText = (text: string): string => {
   return text
@@ -49,9 +58,9 @@ const resolveGender = (gender?: TtsGender): "MALE" | "FEMALE" | "NEUTRAL" => {
 };
 
 const resolveOpenAiVoice = (gender?: TtsGender): string => {
-  if (gender === "male" && openAiTtsVoiceMale) return openAiTtsVoiceMale;
-  if (gender === "female" && openAiTtsVoiceFemale) return openAiTtsVoiceFemale;
-  return openAiTtsVoice;
+  if (gender === "male" && getOpenAiTtsVoiceMale()) return getOpenAiTtsVoiceMale()!;
+  if (gender === "female" && getOpenAiTtsVoiceFemale()) return getOpenAiTtsVoiceFemale()!;
+  return getOpenAiTtsVoice();
 };
 
 const synthesizeLinear16 = async (
@@ -91,12 +100,13 @@ const synthesizeOpenAiOpus = async (
   text: string,
   voice: string,
 ): Promise<Buffer> => {
+  const openAiClient = getOpenAiClient();
   if (!openAiClient) {
     throw new Error("OpenAI TTS is not configured.");
   }
 
   const response = await openAiClient.audio.speech.create({
-    model: openAiTtsModel,
+    model: getOpenAiTtsModel(),
     voice,
     input: text,
     response_format: "opus",
@@ -165,7 +175,7 @@ export const ttsService = {
       }
 
       let wavBuffer: Buffer;
-      if (openAiClient) {
+      if (getOpenAiClient()) {
         try {
           const voice = resolveOpenAiVoice(options?.gender);
           return await synthesizeOpenAiOpus(normalizedText, voice);
