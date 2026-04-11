@@ -1,9 +1,12 @@
-import { ParsedWhatsAppMessage, markAsRead, sendWhatsAppText, startTypingIndicator, stopTypingIndicator } from "../../whatsapp.service";
-import { sendLanguageMenu } from "../../whatsapp.service";
 import {
-  getOrCreateConversation,
-  updateConversation,
-} from "../memory.service";
+  ParsedWhatsAppMessage,
+  markAsRead,
+  sendWhatsAppText,
+  startTypingIndicator,
+  stopTypingIndicator,
+} from "../../whatsapp.service";
+import { sendLanguageMenu } from "../../whatsapp.service";
+import { getOrCreateConversation, updateConversation } from "../memory.service";
 import { logMessage, getConversationMessages } from "../messages.service";
 import {
   detectLanguageMenuChoice,
@@ -22,12 +25,15 @@ async function buildHistoryContext(conversationId: string) {
   if (msgs.length === 0) return { summary: null, lastMessage: null };
 
   // Last bot reply
-  const lastBotMsg = [...msgs].reverse().find((m) => m.direction === "out" && m.body);
+  const lastBotMsg = [...msgs]
+    .reverse()
+    .find((m) => m.direction === "out" && m.body);
   const lastMessage = lastBotMsg?.body ?? null;
 
   // Summarise all but the last 2 messages (current exchange)
   const older = msgs.slice(0, -2);
-  const summary = older.length > 0 ? await gemini.summarizeHistory(older) : null;
+  const summary =
+    older.length > 0 ? await gemini.summarizeHistory(older) : null;
 
   return { summary, lastMessage };
 }
@@ -40,7 +46,7 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
 
   const { conversation, profile, isNew } = await getOrCreateConversation(
     msg.from,
-    msg.profileName
+    msg.profileName,
   );
 
   // Log inbound message immediately so the dashboard shows it.
@@ -75,7 +81,11 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
       return;
     }
     await updateConversation(conversation.id, { city });
-    await sendTextAndLog(msg.from, cityConfirmation(lang, city), conversation.id);
+    await sendTextAndLog(
+      msg.from,
+      cityConfirmation(lang, city),
+      conversation.id,
+    );
     return;
   }
 
@@ -102,7 +112,12 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
     await sendReplyAndLog(msg.from, reply, lang, false, conversation.id);
 
     // ── Step 5: maybe suggest expert (non-blocking) ──
-    await maybeSuggestExpert(msg.from, conversation.id, conversation.city, lang);
+    await maybeSuggestExpert(
+      msg.from,
+      conversation.id,
+      conversation.city,
+      lang,
+    );
   } finally {
     stopTypingIndicator(msg.from);
   }

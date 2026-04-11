@@ -7,6 +7,8 @@ const ttsClient = new textToSpeech.TextToSpeechClient();
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "alloy";
+const openAiTtsVoiceMale = process.env.OPENAI_TTS_VOICE_MALE;
+const openAiTtsVoiceFemale = process.env.OPENAI_TTS_VOICE_FEMALE;
 const openAiClient = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
 const simplifyPidginText = (text: string): string => {
@@ -18,6 +20,7 @@ const simplifyPidginText = (text: string): string => {
 };
 
 type TtsLanguage = "en" | "fr" | "pidgin";
+type TtsGender = "male" | "female" | "neutral";
 
 const resolveLanguageCode = (language?: TtsLanguage): string => {
   if (language === "fr") {
@@ -39,9 +42,22 @@ const resolveVoiceName = (language?: TtsLanguage): string | undefined => {
   return process.env.TTS_VOICE_EN || undefined;
 };
 
+const resolveGender = (gender?: TtsGender): "MALE" | "FEMALE" | "NEUTRAL" => {
+  if (gender === "male") return "MALE";
+  if (gender === "female") return "FEMALE";
+  return "NEUTRAL";
+};
+
+const resolveOpenAiVoice = (gender?: TtsGender): string => {
+  if (gender === "male" && openAiTtsVoiceMale) return openAiTtsVoiceMale;
+  if (gender === "female" && openAiTtsVoiceFemale) return openAiTtsVoiceFemale;
+  return openAiTtsVoice;
+};
+
 const synthesizeLinear16 = async (
   text: string,
   language?: TtsLanguage,
+  gender?: TtsGender,
   useVoiceName = true,
 ): Promise<Buffer> => {
   const languageCode = resolveLanguageCode(language);
@@ -50,7 +66,7 @@ const synthesizeLinear16 = async (
     input: { text },
     voice: {
       languageCode,
-      ssmlGender: "NEUTRAL",
+      ssmlGender: resolveGender(gender),
       name: voiceName,
     },
     audioConfig: {
@@ -70,14 +86,17 @@ const synthesizeLinear16 = async (
   return Buffer.from(response.audioContent as Uint8Array);
 };
 
-const synthesizeOpenAiWav = async (text: string): Promise<Buffer> => {
+const synthesizeOpenAiWav = async (
+  text: string,
+  voice: string,
+): Promise<Buffer> => {
   if (!openAiClient) {
     throw new Error("OpenAI TTS is not configured.");
   }
 
   const response = await openAiClient.audio.speech.create({
     model: openAiTtsModel,
-    voice: openAiTtsVoice,
+    voice,
     input: text,
     response_format: "wav",
   });
@@ -133,7 +152,11 @@ const convertWavToOggOpus = async (wavBuffer: Buffer): Promise<Buffer> => {
 };
 
 export const ttsService = {
-  speak: async (text: string, language?: TtsLanguage): Promise<Buffer> => {
+  speak: async (
+    text: string,
+    language?: TtsLanguage,
+    options?: { gender?: TtsGender },
+  ): Promise<Buffer> => {
     try {
       const normalizedText = simplifyPidginText(text);
       if (!normalizedText) {
@@ -143,7 +166,8 @@ export const ttsService = {
       let wavBuffer: Buffer;
       if (openAiClient) {
         try {
-          wavBuffer = await synthesizeOpenAiWav(normalizedText);
+          const voice = resolveOpenAiVoice(options?.gender);
+          wavBuffer = await synthesizeOpenAiWav(normalizedText, voice);
           return await convertWavToOggOpus(wavBuffer);
         } catch (error) {
           logger.warn(error, "OpenAI TTS failed, falling back to Google TTS");
@@ -151,7 +175,12 @@ export const ttsService = {
       }
 
       try {
-        wavBuffer = await synthesizeLinear16(normalizedText, language, true);
+        wavBuffer = await synthesizeLinear16(
+          normalizedText,
+          language,
+          options?.gender,
+          true,
+        );
       } catch (error) {
         const voiceName = resolveVoiceName(language);
         if (voiceName) {
@@ -159,7 +188,12 @@ export const ttsService = {
             { voiceName },
             "Configured TTS voice failed, retrying with default voice",
           );
-          wavBuffer = await synthesizeLinear16(normalizedText, language, false);
+          wavBuffer = await synthesizeLinear16(
+            normalizedText,
+            language,
+            options?.gender,
+            false,
+          );
         } else {
           throw error;
         }

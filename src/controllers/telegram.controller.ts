@@ -19,9 +19,12 @@ import {
 import {
   buildDoctorMessagesFromAdvice,
   buildDoctorMessagesFromText,
+  buildGreetingMessage,
   buildInlineActions,
   buildLanguageOptionsKeyboard,
+  detectTelegramLanguageFromText,
   delay,
+  isTelegramGreeting,
   mapCallbackLanguage,
   mapConversationLanguageToTelegram,
   mapTelegramLanguageToConversation,
@@ -260,11 +263,17 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
     if (isOnboarding) return;
 
     const user = await getUser(chatId);
-    const preferredLanguage = resolvePreferredLanguage(
+    let preferredLanguage = resolvePreferredLanguage(
       conversation.language,
       profile.preferred_language,
       user.language,
     );
+
+    const detectedLanguage = detectTelegramLanguageFromText(messageText);
+    if (!preferredLanguage && detectedLanguage) {
+      preferredLanguage = detectedLanguage;
+    }
+
     if (!conversation.language && preferredLanguage) {
       await updateConversation(conversation.id, {
         language: mapTelegramLanguageToConversation(preferredLanguage),
@@ -273,15 +282,23 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
         preferred_language:
           mapTelegramLanguageToConversation(preferredLanguage),
       });
+      if (user.language !== preferredLanguage) {
+        await updateUserLanguage(chatId, preferredLanguage);
+      }
     }
 
     const wantsAudio = Boolean(profile.prefers_voice || voiceFileId);
 
     if (messageText) {
+      if (isTelegramGreeting(messageText)) {
+        await sendMessage(chatId, buildGreetingMessage(preferredLanguage));
+        return;
+      }
       const aiResponse = await processFarmerMessage({
         type: "text",
         content: messageText,
         wantsAudio,
+        ttsGender: "male",
         preferredLanguage: preferredLanguage as any,
         userId: user.id,
       });
@@ -322,6 +339,7 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
           type: "image",
           content: url,
           wantsAudio,
+          ttsGender: "male",
           preferredLanguage: preferredLanguage as any,
           userId: user.id,
         });
@@ -374,6 +392,7 @@ const routeFarmerWebhook = async (update: TelegramUpdate) => {
             type: "voice",
             content: audioBuffer,
             wantsAudio,
+            ttsGender: "male",
             preferredLanguage: preferredLanguage as any,
             userId: user.id,
           });

@@ -20,6 +20,7 @@ export interface MessageRequest {
   content: string | Buffer;
   preferredLanguage?: "en" | "fr" | "pidgin";
   wantsAudio?: boolean;
+  ttsGender?: "male" | "female" | "neutral";
 }
 
 export interface ProcessedResponse {
@@ -272,6 +273,7 @@ export const processFarmerMessage = async (
       audioBuffer = await ttsService.speak(
         finalMessageText,
         req.preferredLanguage,
+        { gender: req.ttsGender },
       );
     }
 

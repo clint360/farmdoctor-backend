@@ -2,8 +2,10 @@ import { Language } from "./gemini.service";
 
 export function detectLanguageMenuChoice(text: string): Language | null {
   const t = text.trim().toLowerCase();
-  if (/^1\b/.test(t) || /\benglish\b/.test(t) || /\banglais\b/.test(t)) return "english";
-  if (/^2\b/.test(t) || /\bfran[cç]ais\b/.test(t) || /\bfrench\b/.test(t)) return "french";
+  if (/^1\b/.test(t) || /\benglish\b/.test(t) || /\banglais\b/.test(t))
+    return "english";
+  if (/^2\b/.test(t) || /\bfran[cç]ais\b/.test(t) || /\bfrench\b/.test(t))
+    return "french";
   if (/^3\b/.test(t) || /\bpidgin\b/.test(t)) return "pidgin";
   return null;
 }
