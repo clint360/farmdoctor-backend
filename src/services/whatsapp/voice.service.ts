@@ -11,10 +11,12 @@ import { logger } from "../../utils/logger";
 
 // ─── Config ─────────────────────────
 const getOpenAiKey = () => process.env.OPENAI_API_KEY || "";
-const getOpenAiTtsModel = () => process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const getOpenAiTtsModel = () =>
+  process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const getOpenAiTtsVoice = () => process.env.OPENAI_TTS_VOICE || "alloy";
 const getYarnGptKey = () => process.env.YARNGPT_API_KEY || "";
-const getYarnGptUrl = () => process.env.YARNGPT_API_URL || "https://yarngpt.ai/api/v1/tts";
+const getYarnGptUrl = () =>
+  process.env.YARNGPT_API_URL || "https://yarngpt.ai/api/v1/tts";
 const getYarnGptVoice = () => process.env.YARNGPT_VOICE || "Idera";
 const isVoiceEnabled = () => {
   const v = process.env.ENABLE_VOICE_REPLIES;
@@ -29,17 +31,22 @@ function openaiClient(): OpenAI {
 }
 
 // ─── OpenAI TTS (English + French) ──
-async function synthesizeOpenAI(text: string): Promise<{ buffer: Buffer; mimeType: string }> {
-  return withRetry(async () => {
-    const res = await openaiClient().audio.speech.create({
-      model: getOpenAiTtsModel(),
-      voice: getOpenAiTtsVoice() as unknown as "alloy",
-      input: text,
-      response_format: "opus",
-    });
-    const arr = await res.arrayBuffer();
-    return { buffer: Buffer.from(arr), mimeType: "audio/ogg" };
-  }, { label: "openai.synthesize" });
+async function synthesizeOpenAI(
+  text: string,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  return withRetry(
+    async () => {
+      const res = await openaiClient().audio.speech.create({
+        model: getOpenAiTtsModel(),
+        voice: getOpenAiTtsVoice() as unknown as "alloy",
+        input: text,
+        response_format: "opus",
+      });
+      const arr = await res.arrayBuffer();
+      return { buffer: Buffer.from(arr), mimeType: "audio/ogg" };
+    },
+    { label: "openai.synthesize" },
+  );
 }
 
 // ─── Split text into speakable chunks ──
@@ -57,7 +64,10 @@ function splitIntoChunks(text: string, maxLen = 300): string[] {
     } else {
       if (current) chunks.push(current);
       if (trimmed.length > maxLen) {
-        const parts = trimmed.split(",").map((p) => p.trim()).filter(Boolean);
+        const parts = trimmed
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
         let sub = "";
         for (const part of parts) {
           if ((sub + ", " + part).trim().length <= maxLen) {
@@ -80,38 +90,47 @@ function splitIntoChunks(text: string, maxLen = 300): string[] {
 
 // ─── Single YarnGPT request ──────────
 async function synthesizePidginChunk(text: string): Promise<Buffer> {
-  return withRetry(async () => {
-    const res = await fetch(getYarnGptUrl(), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${getYarnGptKey()}`,
-        "Content-Type": "application/json",
-        Accept: "audio/mpeg",
-      },
-      body: JSON.stringify({
-        text,
-        voice: getYarnGptVoice(),
-        response_format: "mp3",
-      }),
-    });
+  return withRetry(
+    async () => {
+      const res = await fetch(getYarnGptUrl(), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${getYarnGptKey()}`,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text,
+          voice: getYarnGptVoice(),
+          response_format: "mp3",
+        }),
+      });
 
-    if (!res.ok) {
-      throw new Error(`yarngpt failed: ${res.status} ${await res.text()}`);
-    }
+      if (!res.ok) {
+        throw new Error(`yarngpt failed: ${res.status} ${await res.text()}`);
+      }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of res.body as any) {
-      chunks.push(Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
-  }, { label: "yarngpt.chunk", attempts: 5, delayMs: 500 });
+      const chunks: Buffer[] = [];
+      for await (const chunk of res.body as any) {
+        chunks.push(Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    },
+    { label: "yarngpt.chunk", attempts: 5, delayMs: 500 },
+  );
 }
 
 // ─── YarnGPT TTS (Pidgin) — exported for Telegram ──
-export async function synthesizePidgin(text: string): Promise<{ buffer: Buffer; mimeType: string }> {
+export async function synthesizePidgin(
+  text: string,
+): Promise<{ buffer: Buffer; mimeType: string }> {
   const chunks = splitIntoChunks(text);
-  logger.info(`[yarngpt] voice=${getYarnGptVoice()} | chunks=${chunks.length} | totalLen=${text.length}`);
-  const buffers = await Promise.all(chunks.map((chunk) => synthesizePidginChunk(chunk)));
+  logger.info(
+    `[yarngpt] voice=${getYarnGptVoice()} | chunks=${chunks.length} | totalLen=${text.length}`,
+  );
+  const buffers = await Promise.all(
+    chunks.map((chunk) => synthesizePidginChunk(chunk)),
+  );
   return {
     buffer: Buffer.concat(buffers),
     mimeType: "audio/mpeg",
@@ -128,7 +147,7 @@ export async function sendReply(
   to: string,
   text: string,
   language: Language,
-  isCurrentMessageVoice: boolean
+  isCurrentMessageVoice: boolean,
 ): Promise<void> {
   const shouldSendVoice = isCurrentMessageVoice;
 
@@ -140,20 +159,30 @@ export async function sendReply(
   try {
     // Pidgin: translate English text → Pidgin, then YarnGPT.
     // English/French: synthesize directly via OpenAI TTS.
-    const voiceText = language === "pidgin"
-      ? await gemini.translateToPidgin(text)
-      : text;
+    const voiceText =
+      language === "pidgin" ? await gemini.translateToPidgin(text) : text;
 
-    logger.info(`[voice] lang=${language} | engine=${language === "pidgin" ? "yarngpt" : "openai"} | textLen=${voiceText.length} | sending to TTS…`);
+    logger.info(
+      `[voice] lang=${language} | engine=${language === "pidgin" ? "yarngpt" : "openai"} | textLen=${voiceText.length} | sending to TTS…`,
+    );
 
-    const audio = language === "pidgin"
-      ? await synthesizePidgin(voiceText)
-      : await synthesizeOpenAI(voiceText);
+    const audio =
+      language === "pidgin"
+        ? await synthesizePidgin(voiceText)
+        : await synthesizeOpenAI(voiceText);
 
-    logger.info(`[voice] synthesis OK | ${audio.buffer.byteLength} bytes | mime=${audio.mimeType} | uploading…`);
+    logger.info(
+      `[voice] synthesis OK | ${audio.buffer.byteLength} bytes | mime=${audio.mimeType} | uploading…`,
+    );
 
-    const mediaId = await uploadWhatsAppMedia(audio.buffer, audio.mimeType, "reply.ogg");
-    logger.info(`[voice] uploaded mediaId=${mediaId} | sending audio to ${to}…`);
+    const mediaId = await uploadWhatsAppMedia(
+      audio.buffer,
+      audio.mimeType,
+      "reply.ogg",
+    );
+    logger.info(
+      `[voice] uploaded mediaId=${mediaId} | sending audio to ${to}…`,
+    );
 
     await sendWhatsAppAudio(to, mediaId);
     logger.info(`[voice] audio sent to ${to} ✓`);

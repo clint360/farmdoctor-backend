@@ -85,7 +85,7 @@ async function handleText(chatId: number, text: string): Promise<void> {
 
   await withTyping(chatId, "typing", async () => {
     const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-    const reply = await gemini.chat(text, {
+    const { reply } = await gemini.chat(text, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,
@@ -171,7 +171,7 @@ async function handleVoice(chatId: number, fileId: string): Promise<void> {
     }
 
     const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-    const reply = await gemini.chat(transcript, {
+    const { reply } = await gemini.chat(transcript, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,
