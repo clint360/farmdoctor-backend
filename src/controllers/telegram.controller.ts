@@ -3,426 +3,259 @@ import {
   TelegramUpdate,
   sendChatAction,
   sendMessage,
+  sendVoice,
   getTelegramFileUrl,
   answerCallbackQuery,
 } from "../services/telegram.service";
 import { logger } from "../utils/logger";
-import { processOnboarding } from "../services/onboarding.service";
-import { getUser, updateUser } from "../services/user.service";
-import { processFarmerMessage } from "../services/messageProcessor.service";
-import { logInteraction } from "../services/interaction.service";
 import {
   getOrCreateConversationForPlatform,
   updateConversation,
   updateProfile,
 } from "../services/whatsapp/memory.service";
-import {
-  buildDoctorMessagesFromAdvice,
-  buildDoctorMessagesFromText,
-  buildInlineActions,
-  buildLanguageOptionsKeyboard,
-  delay,
-  mapCallbackLanguage,
-  mapConversationLanguageToTelegram,
-  mapTelegramLanguageToConversation,
-} from "../services/telegram/ux.service";
+import { logMessage, getConversationMessages } from "../services/whatsapp/messages.service";
+import * as gemini from "../services/whatsapp/gemini.service";
+import { Language } from "../services/whatsapp/gemini.service";
+import { detectLanguageFromText } from "../services/whatsapp/language.service";
 
-const resolvePreferredLanguage = (
-  conversationLanguage?: string | null,
-  profileLanguage?: string | null,
-  userLanguage?: string | null,
-) => {
-  const fromConversation =
-    mapConversationLanguageToTelegram(conversationLanguage);
-  if (fromConversation) return fromConversation;
+// ─── Helpers ──────────────────────────────────────────
 
-  const fromProfile = mapConversationLanguageToTelegram(profileLanguage);
-  if (fromProfile) return fromProfile;
 
-  if (
-    userLanguage === "en" ||
-    userLanguage === "fr" ||
-    userLanguage === "pidgin"
-  ) {
-    return userLanguage;
-  }
 
-  return undefined;
+
+const downloadFile = async (url: string): Promise<Buffer> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download file: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
 };
 
-const sendDoctorMessages = async (
-  chatId: number,
-  messages: string[],
-  delayMs: number,
-) => {
-  for (let index = 0; index < messages.length; index += 1) {
-    await sendMessage(chatId, messages[index]);
-    if (index < messages.length - 1) {
-      await delay(delayMs);
-    }
-  }
-};
+async function buildHistoryContext(conversationId: string) {
+  const msgs = await getConversationMessages(conversationId, 20);
+  if (msgs.length === 0) return { summary: null, lastMessage: null };
 
-/**
- * Validates and routes Telegram webhooks intelligently
- */
-const routeTelegramCallback = async (
-  update: TelegramUpdate,
-): Promise<boolean> => {
-  if (!update.callback_query) return false;
+  const lastBotMsg = [...msgs].reverse().find((m) => m.direction === "out" && m.body);
+  const lastMessage = lastBotMsg?.body ?? null;
 
-  const callback = update.callback_query;
-  const chatId = callback.message?.chat.id;
-  if (!chatId) return true;
+  const older = msgs.slice(0, -2);
+  const summary = older.length > 0 ? await gemini.summarizeHistory(older) : null;
 
-  const data = callback.data || "";
-  await answerCallbackQuery(callback.id);
+  return { summary, lastMessage };
+}
 
-  const phone = `tg_${chatId}`;
-  const { conversation, profile } = await getOrCreateConversationForPlatform(
-    phone,
-    "telegram",
-    callback.from?.first_name,
-  );
-
-  const user = await getUser(chatId);
-
-  const languageSelection = mapCallbackLanguage(data);
-  if (languageSelection) {
-    if (!user.has_onboarded) {
-      const handled = await processOnboarding(chatId, undefined, data, {
-        onLanguageSelected: async (lang) => {
-          await updateConversation(conversation.id, {
-            language: mapTelegramLanguageToConversation(lang),
-          });
-          await updateProfile(profile.id, {
-            preferred_language: mapTelegramLanguageToConversation(lang),
-          });
-        },
-      });
-      return handled;
-    }
-
-    await updateConversation(conversation.id, {
-      language: languageSelection.conversation,
-    });
-    await updateProfile(profile.id, {
-      preferred_language: languageSelection.conversation,
-    });
-    if (user.language !== languageSelection.telegram) {
-      await updateUserLanguage(chatId, languageSelection.telegram);
-    }
-
-    const confirmText =
-      languageSelection.telegram === "fr"
-        ? "🧑‍🌾 Agro Doctor\n\nD'accord. Je vais repondre en francais."
-        : languageSelection.telegram === "pidgin"
-          ? "🧑‍🌾 Agro Doctor\n\nNo wahala. I go talk pidgin with you."
-          : "🧑‍🌾 Agro Doctor\n\nAlright. I will reply in English.";
-    await sendMessage(chatId, confirmText);
-    return true;
-  }
-
-  if (data === "language") {
-    await sendMessage(
-      chatId,
-      "🧑‍🌾 Agro Doctor\n\nPick your language:",
-      buildLanguageOptionsKeyboard(),
-    );
-    return true;
-  }
-
-  if (data === "voice") {
-    await updateProfile(profile.id, { prefers_voice: true });
-    await sendMessage(
-      chatId,
-      "🧑‍🌾 Agro Doctor\n\nPlease send a voice note, I am listening.",
-    );
-    return true;
-  }
-
-  if (data === "image") {
-    await sendMessage(
-      chatId,
-      "🧑‍🌾 Agro Doctor\n\nPlease send a clear photo of the crop.",
-    );
-    return true;
-  }
-
-  const onboardingHandled = await processOnboarding(chatId, undefined, data, {
-    onLanguageSelected: async (lang) => {
-      await updateConversation(conversation.id, {
-        language: mapTelegramLanguageToConversation(lang),
-      });
-      await updateProfile(profile.id, {
-        preferred_language: mapTelegramLanguageToConversation(lang),
-      });
-    },
-    onLocationSelected: async (location) => {
-      await updateConversation(conversation.id, { city: location });
-    },
-  });
-
-  return onboardingHandled;
-};
-
-const updateUserLanguage = async (
-  chatId: number,
-  language: "en" | "fr" | "pidgin",
-) => {
-  await updateUser(chatId, { language });
-};
-
-const downloadTelegramFile = async (url: string): Promise<Buffer> => {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download Telegram file: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-};
-
-const withChatAction = async (
+async function withTyping(
   chatId: number,
   action: "typing" | "record_voice",
   handler: () => Promise<void>,
-): Promise<void> => {
+): Promise<void> {
   let interval: NodeJS.Timeout | null = null;
-
   try {
     await sendChatAction(chatId, action);
-    interval = setInterval(() => {
-      void sendChatAction(chatId, action);
-    }, 4000);
-
+    interval = setInterval(() => void sendChatAction(chatId, action), 4000);
     await handler();
   } finally {
-    if (interval) {
-      clearInterval(interval);
-    }
+    if (interval) clearInterval(interval);
   }
-};
+}
 
-const routeFarmerWebhook = async (update: TelegramUpdate) => {
-  if (await routeTelegramCallback(update)) return;
-  if (!update.message) return;
+// ─── Text ─────────────────────────────────────────────
 
-  const chatId = update.message.chat.id;
-
+async function handleText(chatId: number, text: string): Promise<void> {
   const phone = `tg_${chatId}`;
   const { conversation, profile } = await getOrCreateConversationForPlatform(
     phone,
     "telegram",
-    update.message.from?.first_name,
   );
-  const messageText = update.message.text;
-  const photoFileId = update.message.photo
-    ? update.message.photo[update.message.photo.length - 1].file_id
-    : undefined;
-  const voiceFileId = update.message.voice?.file_id;
 
-  logger.info(
-    { chatId, messageText, photoFileId, voiceFileId },
-    "Parsed Telegram Update in Controller",
-  );
+  await logMessage({ conversation_id: conversation.id, direction: "in", type: "text", body: text });
+
+  // Auto-detect language silently, never ask
+  if (!conversation.language) {
+    const detected = detectLanguageFromText(text) ?? "english";
+    await updateConversation(conversation.id, { language: detected });
+    conversation.language = detected;
+  }
+
+  // Keep in sync if user switches language mid-conversation
+  const detectedLang = detectLanguageFromText(text);
+  let lang = conversation.language as Language;
+  if (detectedLang && detectedLang !== lang) {
+    lang = detectedLang;
+    await updateConversation(conversation.id, { language: lang });
+  }
+
+  await withTyping(chatId, "typing", async () => {
+    const { summary, lastMessage } = await buildHistoryContext(conversation.id);
+    const { reply } = await gemini.chat(text, {
+      language: lang,
+      city: conversation.city,
+      lastCrop: conversation.last_crop,
+      cropTypes: profile.crop_types,
+      summary,
+      lastMessage,
+    });
+
+    await sendMessage(chatId, (reply));
+    await logMessage({ conversation_id: conversation.id, direction: "out", type: "text", body: reply });
+  });
+}
+
+// ─── Image ────────────────────────────────────────────
+
+async function handleImage(chatId: number, fileId: string): Promise<void> {
+  const phone = `tg_${chatId}`;
+  const { conversation, profile } = await getOrCreateConversationForPlatform(phone, "telegram");
+
+  if (!conversation.language) {
+    await updateConversation(conversation.id, { language: "english" });
+    conversation.language = "english";
+  }
+  const lang = conversation.language as Language;
+
+  const url = await getTelegramFileUrl(fileId);
+  if (!url) {
+    await sendMessage(chatId, ("Sorry, I couldn't download your image. Please try again."));
+    return;
+  }
+
+  await withTyping(chatId, "typing", async () => {
+    const buffer = await downloadFile(url);
+
+    await logMessage({ conversation_id: conversation.id, direction: "in", type: "image", media_url: url });
+
+    const diagnosis = await gemini.diagnoseImage(buffer, "image/jpeg", {
+      language: lang,
+      city: conversation.city,
+      cropTypes: profile.crop_types,
+      lastCrop: conversation.last_crop,
+    });
+
+    if (diagnosis.cropType) {
+      await updateConversation(conversation.id, { last_crop: diagnosis.cropType });
+    }
+
+    const reply = await gemini.explainDiagnosisToFarmer(diagnosis, {
+      language: lang,
+      city: conversation.city,
+      cropTypes: profile.crop_types,
+    });
+
+    await sendMessage(chatId, (reply));
+    await logMessage({ conversation_id: conversation.id, direction: "out", type: "text", body: reply });
+  });
+}
+
+// ─── Voice ────────────────────────────────────────────
+
+async function handleVoice(chatId: number, fileId: string): Promise<void> {
+  const phone = `tg_${chatId}`;
+  const { conversation, profile } = await getOrCreateConversationForPlatform(phone, "telegram");
+
+  if (!profile.prefers_voice) {
+    await updateProfile(profile.id, { prefers_voice: true });
+  }
+
+  const url = await getTelegramFileUrl(fileId);
+  if (!url) {
+    await sendMessage(chatId, ("Sorry, I couldn't download your voice note. Please try again."));
+    return;
+  }
+
+  await withTyping(chatId, "record_voice", async () => {
+    const buffer = await downloadFile(url);
+    const { transcript, language: lang } = await gemini.transcribeAudio(buffer, "audio/ogg");
+
+    await logMessage({ conversation_id: conversation.id, direction: "in", type: "audio", body: transcript });
+
+    if (lang !== conversation.language) {
+      await updateConversation(conversation.id, { language: lang });
+    }
+
+    const { summary, lastMessage } = await buildHistoryContext(conversation.id);
+    const { reply } = await gemini.chat(transcript, {
+      language: lang,
+      city: conversation.city,
+      lastCrop: conversation.last_crop,
+      cropTypes: profile.crop_types,
+      summary,
+      lastMessage,
+    });
+
+    // Pidgin: translate to Cameroon Pidgin text → YarnGPT audio
+    // English/French: OpenAI TTS directly
+    // Falls back to text if audio fails
+    try {
+      let audioBuffer: Buffer;
+      if (lang === "pidgin") {
+        const pidginText = await gemini.translateToPidgin(reply);
+        const { synthesizePidgin } = await import("../services/whatsapp/voice.service");
+        const audio = await synthesizePidgin(pidginText);
+        audioBuffer = audio.buffer;
+      } else {
+        const { ttsService } = await import("../services/ai/tts.service");
+        const ttsLang = lang === "french" ? "fr" : "en";
+        audioBuffer = await ttsService.speak(reply, ttsLang);
+      }
+      await sendVoice(chatId, audioBuffer);
+    } catch {
+      await sendMessage(chatId, (reply));
+    }
+
+    await logMessage({ conversation_id: conversation.id, direction: "out", type: "text", body: reply });
+  });
+}
+
+// ─── Router ───────────────────────────────────────────
+
+const routeFarmerWebhook = async (update: TelegramUpdate): Promise<void> => {
+  if (update.callback_query) {
+    const { id, message, data = "", from } = update.callback_query;
+    const chatId = message?.chat.id;
+    await answerCallbackQuery(id);
+    if (!chatId) return;
+
+    if (data.startsWith("lang_")) {
+      const lang: Language =
+        data === "lang_fr" ? "french" : data === "lang_pidgin" ? "pidgin" : "english";
+      const phone = `tg_${chatId}`;
+      const { conversation } = await getOrCreateConversationForPlatform(phone, "telegram", from?.first_name);
+      await updateConversation(conversation.id, { language: lang });
+      const confirm =
+        lang === "french"
+          ? "D'accord, je vais repondre en francais."
+          : lang === "pidgin"
+            ? "No wahala. I go tok pidgin with you."
+            : "Alright, I will reply in English.";
+      await sendMessage(chatId, (confirm));
+    }
+    return;
+  }
+
+  if (!update.message) return;
+
+  const { chat, text, photo, voice } = update.message;
+  const chatId = chat.id;
 
   try {
-    if (messageText === "/menu") {
+    if (text === "/start" || text === "/settings") {
+      const phone = `tg_${chatId}`;
+      const { conversation } = await getOrCreateConversationForPlatform(phone, "telegram");
+      await updateConversation(conversation.id, { language: null, city: null });
       await sendMessage(
         chatId,
-        "🧑‍🌾 Agro Doctor\n\nHere are your options:",
-        buildInlineActions(),
+        ("Welcome to Farm Doctor! 🌱 I'm your AI farming assistant.\n\nJust tell me about your crop problem, send a photo, or send a voice note — in any language."),
       );
       return;
     }
 
-    const isOnboarding = await processOnboarding(
-      chatId,
-      messageText,
-      undefined,
-      {
-        onLanguageSelected: async (lang) => {
-          await updateConversation(conversation.id, {
-            language: mapTelegramLanguageToConversation(lang),
-          });
-          await updateProfile(profile.id, {
-            preferred_language: mapTelegramLanguageToConversation(lang),
-          });
-        },
-        onLocationSelected: async (location) => {
-          await updateConversation(conversation.id, { city: location });
-        },
-      },
-    );
-    if (isOnboarding) return;
+    if (text) { await handleText(chatId, text); return; }
+    if (photo) { await handleImage(chatId, photo[photo.length - 1].file_id); return; }
+    if (voice) { await handleVoice(chatId, voice.file_id); return; }
 
-    const user = await getUser(chatId);
-    const preferredLanguage = resolvePreferredLanguage(
-      conversation.language,
-      profile.preferred_language,
-      user.language,
-    );
-    if (!conversation.language && preferredLanguage) {
-      await updateConversation(conversation.id, {
-        language: mapTelegramLanguageToConversation(preferredLanguage),
-      });
-      await updateProfile(profile.id, {
-        preferred_language:
-          mapTelegramLanguageToConversation(preferredLanguage),
-      });
-    }
-
-    const wantsAudio = Boolean(profile.prefers_voice || voiceFileId);
-
-    if (messageText) {
-      const aiResponse = await processFarmerMessage({
-        type: "text",
-        content: messageText,
-        wantsAudio,
-        preferredLanguage: preferredLanguage as any,
-        userId: user.id,
-      });
-      const doctorMessages =
-        aiResponse.shouldLogInteraction === false
-          ? buildDoctorMessagesFromText(
-              aiResponse.finalMessageText,
-              preferredLanguage,
-            )
-          : buildDoctorMessagesFromAdvice(
-              aiResponse.structuredAdvice,
-              preferredLanguage,
-            );
-      await sendDoctorMessages(chatId, doctorMessages, 1000);
-      if (wantsAudio && aiResponse.audioBuffer) {
-        await sendVoiceWithAction(chatId, aiResponse.audioBuffer);
-      }
-      if (user.id && aiResponse.shouldLogInteraction !== false)
-        await logInteraction(
-          {
-            user_id: user.id,
-            type: "text",
-            crop: aiResponse.structuredAdvice.crop,
-            issue: aiResponse.structuredAdvice.issue,
-          },
-          {
-            userText: aiResponse.userText,
-            assistantText: aiResponse.finalMessageText,
-          },
-        );
-      return;
-    }
-
-    if (photoFileId) {
-      const url = await getTelegramFileUrl(photoFileId);
-      if (url) {
-        const aiResponse = await processFarmerMessage({
-          type: "image",
-          content: url,
-          wantsAudio,
-          preferredLanguage: preferredLanguage as any,
-          userId: user.id,
-        });
-        const doctorMessages =
-          aiResponse.shouldLogInteraction === false
-            ? buildDoctorMessagesFromText(
-                aiResponse.finalMessageText,
-                preferredLanguage,
-              )
-            : buildDoctorMessagesFromAdvice(
-                aiResponse.structuredAdvice,
-                preferredLanguage,
-              );
-        await sendDoctorMessages(chatId, doctorMessages, 1000);
-        if (wantsAudio && aiResponse.audioBuffer) {
-          await sendVoiceWithAction(chatId, aiResponse.audioBuffer);
-        }
-        if (user.id && aiResponse.shouldLogInteraction !== false)
-          await logInteraction(
-            {
-              user_id: user.id,
-              type: "image",
-              crop: aiResponse.structuredAdvice.crop,
-              issue: aiResponse.structuredAdvice.issue,
-            },
-            {
-              userText: aiResponse.userText,
-              assistantText: aiResponse.finalMessageText,
-            },
-          );
-        return;
-      }
-
-      await sendMessage(
-        chatId,
-        "🧑‍🌾 Agro Doctor\n\nSorry, I couldn't download your image. Please try again.",
-      );
-      return;
-    }
-
-    if (voiceFileId) {
-      if (!profile.prefers_voice) {
-        await updateProfile(profile.id, { prefers_voice: true });
-      }
-      const url = await getTelegramFileUrl(voiceFileId);
-      if (url) {
-        await withChatAction(chatId, "record_voice", async () => {
-          const audioBuffer = await downloadTelegramFile(url);
-          const aiResponse = await processFarmerMessage({
-            type: "voice",
-            content: audioBuffer,
-            wantsAudio,
-            preferredLanguage: preferredLanguage as any,
-            userId: user.id,
-          });
-          if (wantsAudio && aiResponse.audioBuffer) {
-            await sendVoiceWithAction(chatId, aiResponse.audioBuffer);
-          }
-          if (user.id && aiResponse.shouldLogInteraction !== false)
-            await logInteraction(
-              {
-                user_id: user.id,
-                type: "voice",
-                crop: aiResponse.structuredAdvice.crop,
-                issue: aiResponse.structuredAdvice.issue,
-              },
-              {
-                userText: aiResponse.userText,
-                assistantText: aiResponse.finalMessageText,
-              },
-            );
-        });
-        return;
-      }
-
-      await sendMessage(
-        chatId,
-        "🧑‍🌾 Agro Doctor\n\nSorry, I couldn't download your voice note.",
-      );
-      return;
-    }
-
-    await sendMessage(
-      chatId,
-      "🧑‍🌾 Agro Doctor\n\nI received your message, but I only understand text, pictures of crops, and voice notes.",
-    );
+    await sendMessage(chatId, ("I understand text messages, crop photos, and voice notes. What's going on with your farm?"));
   } catch (err) {
-    logger.error(
-      err,
-      "Critical error executing webhook payload routing pipeline",
-    );
-    await sendMessage(
-      chatId,
-      "🧑‍🌾 Agro Doctor\n\nSorry, I encountered an internal error processing your request. Please try again shortly.",
-    );
+    logger.error(err, "Error in Telegram webhook handler");
+    await sendMessage(chatId, ("Sorry, something went wrong. Please try again.")).catch(() => {});
   }
-};
-
-const sendVoiceWithAction = async (chatId: number, audioBuffer: Buffer) => {
-  const { sendVoice } = await import("../services/telegram.service");
-  await sendVoice(chatId, audioBuffer);
 };
 
 export const handleTelegramWebhook = async (
@@ -431,17 +264,12 @@ export const handleTelegramWebhook = async (
 ) => {
   try {
     const update = request.body as TelegramUpdate;
-
     routeFarmerWebhook(update).catch((err) => {
-      logger.error(
-        err,
-        "Failed asynchronous execution of Telegram controller routing",
-      );
+      logger.error(err, "Failed async Telegram webhook routing");
     });
-
     return reply.status(200).send({ success: true });
   } catch (error) {
-    logger.error(error, "Error catching Fastify incoming webhook body");
+    logger.error(error, "Error parsing Telegram webhook body");
     return reply.status(500).send({ success: false });
   }
 };

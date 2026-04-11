@@ -5,18 +5,122 @@ export type TelegramLanguage = "en" | "fr" | "pidgin";
 
 const DOCTOR_PREFIX = "🧑‍🌾 Agro Doctor";
 
-const firstSentence = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  const split = trimmed
-    .split(/\.|\n/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return split[0] || trimmed;
-};
-
 const normalize = (value: string | null | undefined): string =>
   (value || "").trim();
+
+const tokenize = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+const countMatches = (tokens: string[], patterns: Array<RegExp>): number => {
+  let count = 0;
+  for (const token of tokens) {
+    if (patterns.some((pattern) => pattern.test(token))) {
+      count += 1;
+    }
+  }
+  return count;
+};
+
+const GREETING_PATTERNS = {
+  en: [
+    /^hi$/,
+    /^hello$/,
+    /^hey$/,
+    /^yo$/,
+    /^good$/,
+    /^morning$/,
+    /^afternoon$/,
+    /^evening$/,
+    /^greetings$/,
+  ],
+  fr: [/^bonjour$/, /^salut$/, /^bonsoir$/, /^coucou$/],
+  pidgin: [/^how$/, /^far$/, /^abeg$/, /^howfar$/, /^howfar\?$/, /^wazup$/],
+};
+
+const GREETING_FILLERS = new Set([
+  "there",
+  "sir",
+  "madam",
+  "boss",
+  "bro",
+  "sis",
+  "please",
+]);
+
+const LANGUAGE_HINTS = {
+  fr: [
+    /^bonjour$/,
+    /^salut$/,
+    /^bonsoir$/,
+    /^merci$/,
+    /^svp$/,
+    /^s'il$/,
+    /^plait$/,
+    /^je$/,
+    /^moi$/,
+    /^votre$/,
+    /^ma$/,
+    /^mon$/,
+    /^probleme$/,
+    /^plante$/,
+  ],
+  pidgin: [
+    /^abeg$/,
+    /^wetin$/,
+    /^dey$/,
+    /^na$/,
+    /^wahala$/,
+    /^sabi$/,
+    /^una$/,
+    /^howfar$/,
+    /^how$/,
+    /^far$/,
+  ],
+};
+
+export const detectTelegramLanguageFromText = (
+  text?: string | null,
+): TelegramLanguage | undefined => {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return undefined;
+  const tokens = tokenize(trimmed);
+
+  const frScore = countMatches(tokens, LANGUAGE_HINTS.fr);
+  const pidginScore = countMatches(tokens, LANGUAGE_HINTS.pidgin);
+
+  if (pidginScore > frScore && pidginScore > 0) return "pidgin";
+  if (frScore > pidginScore && frScore > 0) return "fr";
+
+  return undefined;
+};
+
+export const isTelegramGreeting = (text?: string | null): boolean => {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return false;
+  const tokens = tokenize(trimmed);
+  if (tokens.length > 5) return false;
+
+  const greetingScore =
+    countMatches(tokens, GREETING_PATTERNS.en) +
+    countMatches(tokens, GREETING_PATTERNS.fr) +
+    countMatches(tokens, GREETING_PATTERNS.pidgin);
+  if (greetingScore === 0) return false;
+
+  const nonGreetingTokens = tokens.filter((token) => {
+    const isGreeting =
+      GREETING_FILLERS.has(token) ||
+      GREETING_PATTERNS.en.some((pattern) => pattern.test(token)) ||
+      GREETING_PATTERNS.fr.some((pattern) => pattern.test(token)) ||
+      GREETING_PATTERNS.pidgin.some((pattern) => pattern.test(token));
+    return !isGreeting;
+  });
+
+  return nonGreetingTokens.length === 0;
+};
 
 export const mapConversationLanguageToTelegram = (
   value?: string | null,
@@ -63,41 +167,34 @@ const ackFor = (language?: TelegramLanguage): string => {
   return "Hmm... I hear you. Thanks for the details.";
 };
 
-const explainFor = (
-  advice: FarmingAdviceData,
-  language?: TelegramLanguage,
-): string => {
-  const crop =
-    normalize(advice.crop) || (language === "fr" ? "la plante" : "the crop");
-  const issue =
-    normalize(advice.issue) ||
-    (language === "fr" ? "un probleme" : "a problem");
-
-  if (language === "fr") {
-    return `Je pense que ${crop} a ${issue}.`;
-  }
-  if (language === "pidgin") {
-    return `E be like say ${crop} get ${issue}.`;
-  }
-  return `It looks like ${crop} has ${issue}.`;
-};
-
 const responseFor = (
   advice: FarmingAdviceData,
   language?: TelegramLanguage,
 ): string => {
   const crop =
     normalize(advice.crop) || (language === "fr" ? "la plante" : "your crop");
-  const solution = firstSentence(normalize(advice.solution)) || "";
-  const tips = firstSentence(normalize(advice.tips)) || "";
+  const issue =
+    normalize(advice.issue) ||
+    (language === "fr" ? "un problème" : "a problem");
+  const solution = normalize(advice.solution);
+  const tips = normalize(advice.tips);
 
   if (language === "fr") {
-    return `D'accord. Pour ${crop}, je vous conseille ${solution || "d'enlever les parties atteintes"}, puis ${tips || "de garder la plante propre"}.`;
+    const parts = [`Je pense que votre ${crop} a ${issue}.`];
+    if (solution) parts.push(solution);
+    if (tips) parts.push(tips);
+    return parts.join(" ");
   }
   if (language === "pidgin") {
-    return `Okay. For ${crop}, I suggest ${solution || "cut the bad part"}, then ${tips || "keep the crop clean"}.`;
+    const parts = [`E be like say your ${crop} get ${issue}.`];
+    if (solution) parts.push(solution);
+    if (tips) parts.push(tips);
+    return parts.join(" ");
   }
-  return `Okay. For ${crop}, I suggest ${solution || "remove the bad parts"}, then ${tips || "keep the crop clean"}.`;
+  const parts = [`It looks like your ${crop} has ${issue}.`];
+  if (solution) parts.push(solution);
+  if (tips) parts.push(tips);
+  return parts.join(" ");
 };
 
 export const buildDoctorMessagesFromAdvice = (
@@ -125,6 +222,22 @@ export const buildDoctorMessagesFromText = (
         : `Okay. ${trimmed}`;
 
   return [withPrefix(message)];
+};
+
+export const buildGreetingMessage = (language?: TelegramLanguage): string => {
+  if (language === "fr") {
+    return withPrefix(
+      "Bonjour! Je suis Agro Doctor. Dites-moi la culture et ce que vous voyez, ou envoyez une photo/voix.",
+    );
+  }
+  if (language === "pidgin") {
+    return withPrefix(
+      "How far! I be Agro Doctor. Tell me the crop and wetin you see, or send photo/voice.",
+    );
+  }
+  return withPrefix(
+    "Hello! I am Agro Doctor. Tell me the crop and what you see, or send a photo/voice note.",
+  );
 };
 
 export const buildInlineActions = (): { inline_keyboard: Array<any> } => {

@@ -20,6 +20,7 @@ export interface MessageRequest {
   content: string | Buffer;
   preferredLanguage?: "en" | "fr" | "pidgin";
   wantsAudio?: boolean;
+  ttsGender?: "male" | "female" | "neutral";
 }
 
 export interface ProcessedResponse {
@@ -68,26 +69,29 @@ const formatAdviceMessage = (
   advice: FarmingAdviceData,
   language?: MessageRequest["preferredLanguage"],
 ): string => {
-  const solutionText = normalizeText(advice.solution).trim();
-  const tipsText = normalizeText(advice.tips).trim();
+  const crop = (advice.crop || "").trim() || "your crop";
+  const issue = (advice.issue || "").trim() || "a problem";
+  const solution = normalizeText(advice.solution).trim();
+  const tips = normalizeText(advice.tips).trim();
 
   if (language === "pidgin") {
-    return [
-      `Crop: ${advice.crop}`,
-      `Problem: ${advice.issue}`,
-      "",
-      `Wetin you fit do: ${solutionText}`,
-      `Tips: ${tipsText}`,
-    ].join("\n");
+    const parts = [`E be like say your ${crop} get ${issue}.`];
+    if (solution) parts.push(solution);
+    if (tips) parts.push(tips);
+    return parts.join(" ");
   }
 
-  return [
-    `Crop: ${advice.crop}`,
-    `Problem: ${advice.issue}`,
-    "",
-    `What to do: ${solutionText}`,
-    `Tips: ${tipsText}`,
-  ].join("\n");
+  if (language === "fr") {
+    const parts = [`Il semble que votre ${crop} a ${issue}.`];
+    if (solution) parts.push(solution);
+    if (tips) parts.push(tips);
+    return parts.join(" ");
+  }
+
+  const parts = [`It looks like your ${crop} has ${issue}.`];
+  if (solution) parts.push(solution);
+  if (tips) parts.push(tips);
+  return parts.join(" ");
 };
 
 const buildFallbackAdvice = (): FarmingAdviceData => ({
@@ -269,6 +273,7 @@ export const processFarmerMessage = async (
       audioBuffer = await ttsService.speak(
         finalMessageText,
         req.preferredLanguage,
+        { gender: req.ttsGender },
       );
     }
 
