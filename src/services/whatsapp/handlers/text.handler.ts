@@ -141,10 +141,10 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
       } else {
         const noExpertsMsg =
           lang === "french"
-            ? `Désolé, aucun expert disponible près de ${conversation.city} pour le moment. Nous travaillons à en ajouter !`
+            ? `Désolé, aucun expert disponible près de votre champ pour le moment. Nous travaillons à en ajouter !`
             : lang === "pidgin"
-              ? `Sorry, no expert dey for ${conversation.city} now now. We dey work to add some!`
-              : `Sorry, no experts available near ${conversation.city} right now. We're working on adding more!`;
+              ? `Sorry, no expert dey for farm area now. We dey work to add some!`
+              : `Sorry, no experts available near your farm right now. We're working on adding more!`;
         await sendTextAndLog(msg.from, noExpertsMsg, conversation.id);
       }
     } else if (chatResponse.special_request === "insight") {
