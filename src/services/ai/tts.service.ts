@@ -3,9 +3,13 @@ import OpenAI from "openai";
 import { spawn } from "node:child_process";
 import { logger } from "../../utils/logger";
 
-const ttsClient = new textToSpeech.TextToSpeechClient();
+const ttsClient = new textToSpeech.TextToSpeechClient(
+  process.env.GOOGLE_CREDENTIALS_JSON
+    ? { credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON) }
+    : {},
+);
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
-const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const openAiTtsModel = process.env.OPENAI_TTS_MODEL || "tts-1";
 const openAiTtsVoice = process.env.OPENAI_TTS_VOICE || "alloy";
 const openAiTtsVoiceMale = process.env.OPENAI_TTS_VOICE_MALE;
 const openAiTtsVoiceFemale = process.env.OPENAI_TTS_VOICE_FEMALE;
@@ -169,9 +173,11 @@ export const ttsService = {
           const voice = resolveOpenAiVoice(options?.gender);
           wavBuffer = await synthesizeOpenAiWav(normalizedText, voice);
           return await convertWavToOggOpus(wavBuffer);
-        } catch (error) {
-          logger.warn(error, "OpenAI TTS failed, falling back to Google TTS");
+        } catch (error: any) {
+          logger.warn({ message: error?.message, status: error?.status, code: error?.code }, "OpenAI TTS failed, falling back to Google TTS");
         }
+      } else {
+        logger.info("OpenAI TTS skipped: OPENAI_API_KEY not set");
       }
 
       try {

@@ -2,7 +2,11 @@ import speech from "@google-cloud/speech";
 import { spawn } from "node:child_process";
 import { logger } from "../../utils/logger";
 
-const sttClient = new speech.SpeechClient();
+const sttClient = new speech.SpeechClient(
+  process.env.GOOGLE_CREDENTIALS_JSON
+    ? { credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON) }
+    : {},
+);
 
 const convertOggToLinear16 = async (
   audioBuffer: Buffer,
