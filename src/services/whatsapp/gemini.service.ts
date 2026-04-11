@@ -136,27 +136,42 @@ ALWAYS include the "reply" field with your normal farming advice/response.`;
   });
   
   const raw = (result.text ?? "").trim();
-  
-  // Parse JSON response
+
+  // Strip markdown code fences
   const cleaned = raw
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
     .replace(/```\s*$/i, "")
     .trim();
 
+  // Try full JSON parse first
   try {
     const parsed = JSON.parse(cleaned);
-    return {
-      special_request: parsed.specialRequest || null,
-      reply: parsed.reply || (result.text ?? "").trim(),
-    };
+    if (parsed.reply) {
+      return {
+        special_request: parsed.specialRequest || null,
+        reply: parsed.reply,
+      };
+    }
   } catch {
-    // Fallback: treat as normal reply if JSON parsing fails
+    // fall through to regex extraction
+  }
+
+  // Fallback: extract "reply" value with regex in case newlines broke JSON.parse
+  const replyMatch = cleaned.match(/"reply"\s*:\s*"([\s\S]*?)"\s*[,}]/);
+  if (replyMatch) {
+    const specialMatch = cleaned.match(/"specialRequest"\s*:\s*"(expert|insight)"/);
     return {
-      special_request: null,
-      reply: raw,
+      special_request: (specialMatch?.[1] as "expert" | "insight") || null,
+      reply: replyMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'),
     };
   }
+
+  // Final fallback: return raw text as-is
+  return {
+    special_request: null,
+    reply: cleaned,
+  };
 }
 
 // ─── Vision diagnosis ───────────────
