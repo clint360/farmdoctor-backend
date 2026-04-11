@@ -86,7 +86,8 @@ const synthesizeLinear16 = async (
   return Buffer.from(response.audioContent as Uint8Array);
 };
 
-const synthesizeOpenAiWav = async (
+// Request opus directly — no ffmpeg conversion needed
+const synthesizeOpenAiOpus = async (
   text: string,
   voice: string,
 ): Promise<Buffer> => {
@@ -98,7 +99,7 @@ const synthesizeOpenAiWav = async (
     model: openAiTtsModel,
     voice,
     input: text,
-    response_format: "wav",
+    response_format: "opus",
   });
 
   const arrayBuffer = await response.arrayBuffer();
@@ -167,8 +168,7 @@ export const ttsService = {
       if (openAiClient) {
         try {
           const voice = resolveOpenAiVoice(options?.gender);
-          wavBuffer = await synthesizeOpenAiWav(normalizedText, voice);
-          return await convertWavToOggOpus(wavBuffer);
+          return await synthesizeOpenAiOpus(normalizedText, voice);
         } catch (error: any) {
           logger.warn({ message: error?.message, status: error?.status, code: error?.code }, "OpenAI TTS failed, falling back to Google TTS");
         }
