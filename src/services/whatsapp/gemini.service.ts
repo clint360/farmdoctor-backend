@@ -97,10 +97,15 @@ function buildContextBlock(ctx: ConversationContext): string {
   if (ctx.lastTreatment)
     lines.push(`Last treatment suggested: ${ctx.lastTreatment}`);
   lines.push("");
-  const replyLang = ctx.language === "pidgin" ? "english" : ctx.language;
-  lines.push(
-    `IMPORTANT: Reply entirely in ${replyLang}. Only recommend treatments, brands, and agro-inputs available in Cameroon.`,
-  );
+  if (ctx.language === "pidgin") {
+    lines.push(
+      `IMPORTANT: Reply entirely in natural Cameroon Pidgin English (Kamtok). Use authentic vocabulary: "wetin" (what), "dey" (is/are), "sabi" (know), "chop" (eat), "waka" (go), "abeg" (please), "no wahala" (no problem), "e don" (it has), "make you" (you should), "na" (it is), "dem" (they), "plenty" (many), "small small" (gradually), "sharp sharp" (quickly), "kontri" (country/area), "pikin" (small/child), "palava" (problem). Keep it short and conversational. Only recommend treatments available in Cameroon.`
+    );
+  } else {
+    lines.push(
+      `IMPORTANT: Reply entirely in ${ctx.language}. Only recommend treatments, brands, and agro-inputs available in Cameroon.`,
+    );
+  }
 
   if (ctx.summary) {
     lines.push("");
