@@ -123,7 +123,17 @@ export async function handleImage(msg: ParsedWhatsAppMessage): Promise<void> {
       cropTypes: profile.crop_types,
     });
 
-    await sendReplyAndLog(msg.from, reply, lang, false, conversation.id);
+    // Append City Chemist upsell when a specific treatment was recommended
+    const cityChemistLine: Record<string, string> = {
+      english: "_If you are looking to get some of our products, check out City Chemist by Farm Doctor: https://farm-doctor.vercel.app/city-chemist_",
+      french:  "_Si vous souhaitez vous procurer certains de nos produits, consultez City Chemist by Farm Doctor\u00a0: https://farm-doctor.vercel.app/city-chemist_",
+      pidgin:  "_If you wan get some of our products dem, check City Chemist by Farm Doctor for here: https://farm-doctor.vercel.app/city-chemist_",
+    };
+    const finalReply = diagnosis.treatment
+      ? `${reply}\n\n${cityChemistLine[lang] ?? cityChemistLine.english}`
+      : reply;
+
+    await sendReplyAndLog(msg.from, finalReply, lang, false, conversation.id);
 
     // Image diagnosis is a natural trigger for expert help
     await maybeSuggestExpert(msg.from, conversation.id, conversation.city, lang);
