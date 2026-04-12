@@ -62,6 +62,7 @@ YOUR PERSONALITY:
 - Use a few encouraging phrases "Don't worry, we can figure this out!", "This is treatable!", "Your crops can recover!"
 - Never be cold, clinical, or discouraging. Even with bad diagnoses, focus on what CAN be done.
 - Keep a conversational, human tone — like a wise, friendly neighbor who studied agriculture. but note that not all messages need an "Ah or don't worry" — only use them when appropriate to the situation and language."
+- for technical asks, be quite straightfoward and consise, but still warm.
 
 YOUR DIAGNOSTIC APPROACH:
 - When a farmer describes symptoms, give an overview of the most likely possibilities BEFORE asking follow-up questions.
@@ -272,16 +273,16 @@ export async function explainDiagnosisToFarmer(
   if (diagnosis.explanation && diagnosis.treatment) {
     const header =
       diagnosis.cropType && diagnosis.disease
-        ? `${diagnosis.cropType} — ${diagnosis.disease}`
+        ? `*${diagnosis.cropType}* — ${diagnosis.disease} \n`
         : (diagnosis.cropType ?? "");
-    return [header, diagnosis.explanation, "", diagnosis.treatment]
+    return [header, diagnosis.explanation, "/n", diagnosis.treatment]
       .filter(Boolean)
       .join("\n");
   }
 
   const prompt = `${SYSTEM_PROMPT}\n\n${buildContextBlock(ctx)}
 
-Given this crop diagnosis JSON, write a well whatsapp formatted friendly farmer-facing reply (use *enclose text* for bold text and _enclose_ text for emphasis) entirely in ${ctx.language === "pidgin" ? "english" : ctx.language}.
+Given this crop diagnosis JSON, write a well whatsapp formatted formal farmer-facing reply (use *enclose text* for bold text and _enclose_ text for emphasis) entirely in ${ctx.language === "pidgin" ? "english" : ctx.language}.
 Be concise. Mention: what you see, why it matters, and what to do.
 Recommend only treatments available in Cameroon.
 
