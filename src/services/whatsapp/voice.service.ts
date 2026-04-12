@@ -156,43 +156,45 @@ export async function sendReply(
     return;
   }
 
-  try {
-    // Pidgin: translate English text → Pidgin, then YarnGPT.
-    // English/French: synthesize directly via OpenAI TTS.
-    const voiceText =
-      language === "pidgin" ? await gemini.translateToPidgin(text) : text;
+  // Always send text first so the user gets an instant response.
+  // Voice is then attempted asynchronously — if it succeeds the audio follows.
+  await sendWhatsAppText(to, text);
 
-    logger.info(
-      `[voice] lang=${language} | engine=${language === "pidgin" ? "yarngpt" : "openai"} | textLen=${voiceText.length} | sending to TTS…`,
-    );
+  // Fire voice synthesis in the background — never blocks the text reply
+  (async () => {
+    try {
+      // Pidgin: translate English text → Pidgin, then YarnGPT.
+      // English/French: synthesize directly via OpenAI TTS.
+      const voiceText =
+        language === "pidgin" ? await gemini.translateToPidgin(text) : text;
 
-    const audio =
-      language === "pidgin"
-        ? await synthesizePidgin(voiceText)
-        : await synthesizeOpenAI(voiceText);
+      logger.info(
+        `[voice] lang=${language} | engine=${language === "pidgin" ? "yarngpt" : "openai"} | textLen=${voiceText.length} | sending to TTS…`,
+      );
 
-    logger.info(
-      `[voice] synthesis OK | ${audio.buffer.byteLength} bytes | mime=${audio.mimeType} | uploading…`,
-    );
+      const audio =
+        language === "pidgin"
+          ? await synthesizePidgin(voiceText)
+          : await synthesizeOpenAI(voiceText);
 
-    const mediaId = await uploadWhatsAppMedia(
-      audio.buffer,
-      audio.mimeType,
-      "reply.ogg",
-    );
-    logger.info(
-      `[voice] uploaded mediaId=${mediaId} | sending audio to ${to}…`,
-    );
+      logger.info(
+        `[voice] synthesis OK | ${audio.buffer.byteLength} bytes | mime=${audio.mimeType} | uploading…`,
+      );
 
-    await sendWhatsAppAudio(to, mediaId);
-    logger.info(`[voice] audio sent to ${to} ✓`);
-  } catch (err: unknown) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      logger.info(`[voice] cancelled for ${to} (new message arrived)`);
-      return;
+      const mediaId = await uploadWhatsAppMedia(
+        audio.buffer,
+        audio.mimeType,
+        "reply.ogg",
+      );
+      logger.info(
+        `[voice] uploaded mediaId=${mediaId} | sending audio to ${to}…`,
+      );
+
+      await sendWhatsAppAudio(to, mediaId);
+      logger.info(`[voice] audio sent to ${to} ✓`);
+    } catch (err: unknown) {
+      // Voice failed — text was already sent so no fallback needed
+      logger.error(err, `[voice] TTS/upload FAILED lang=${language} | text already delivered`);
     }
-    logger.error(err, `[voice] FAILED lang=${language} | falling back to text`);
-    await sendWhatsAppText(to, text);
-    logger.info(`[voice] text fallback sent to ${to}`);
-  }
+  })();
 }
