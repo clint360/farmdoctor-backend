@@ -37,7 +37,7 @@ const FREE_LIMITS: PlanLimits = {
   image_analyses: 3,
   can_access_experts: false,
 };
-const FREE_MESSAGE_LIMIT = 20;
+const FREE_MESSAGE_LIMIT = 10;
 
 export const VALID_PLANS = ["starter", "pro", "cooperative"] as const;
 export type PlanName = (typeof VALID_PLANS)[number];
