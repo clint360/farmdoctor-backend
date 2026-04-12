@@ -7,6 +7,7 @@ import { handleGetSubscription, handleCreateSubscription, handlePaymentStatus } 
 import { handleCreateWebCall, handleCallEnded } from '../controllers/retell.controller';
 import { handleMissedCall } from '../controllers/missedCall.controller';
 import { handleInsightsSearch, handleInsightsSuggestions } from '../controllers/insights.controller';
+import { handleGetProducts, handleGetProductById, handleCreateOrder } from '../controllers/chemist.controller';
 /**
  * Setup all application routes
  */
@@ -40,4 +41,9 @@ export const setupRoutes = async (fastify: FastifyInstance) => {
   // Agricultural Insights (public)
   fastify.get('/api/insights/search', handleInsightsSearch);
   fastify.get('/api/insights/suggestions', handleInsightsSuggestions);
+
+  // City Chemist — products & orders
+  fastify.get('/api/chemist/products', handleGetProducts);
+  fastify.get('/api/chemist/products/:id', handleGetProductById);
+  fastify.post('/api/chemist/orders', handleCreateOrder);
 };
