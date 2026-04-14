@@ -321,7 +321,7 @@ export async function checkPaymentAndActivate(transId: string): Promise<{
       message: "Payment is still processing. Please confirm on your phone.",
     };
   } catch (error) {
-    logger.error(error, "Error checking payment status");
+    logger.error(error, "Error checking payment status.");
     return {
       status: "FAILED" as FapshiStatus,
       activated: false,
