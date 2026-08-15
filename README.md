@@ -2,7 +2,6 @@
 
 > **AI-powered agricultural assistant helping farmers across Cameroon** — available on WhatsApp and Telegram, speaking English, French, and Cameroon Pidgin.
 
----
 
 ## ✨ Features
 
@@ -238,5 +237,6 @@ GitHub Actions automatically deploys to Railway on every merge to `main`:
 ## 📄 License
 
 ISC
-#   f a r m d o c t o r - b a c k e n d  
+#   f a r m d o c t o r - b a c k e n d 
+ 
  
