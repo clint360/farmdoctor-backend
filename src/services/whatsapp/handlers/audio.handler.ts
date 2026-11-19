@@ -12,8 +12,8 @@ import {
   incrementProfileUsage,
 } from "../memory.service";
 import { logMessage, getConversationMessages } from "../messages.service";
-import * as gemini from "../gemini.service";
-import { Language, type ChatResponse } from "../gemini.service";
+import * as assistant from "../../ai/assistant.service";
+import { Language, type ChatResponse } from "../../ai/assistant.service";
 import { sendReplyAndLog, sendTextAndLog } from "../send.service";
 import { askCity, cityConfirmation } from "../language.service";
 import { checkAndEnforceQuota } from "../../subscription.service";
@@ -30,7 +30,7 @@ async function buildHistoryContext(conversationId: string) {
 
   const older = msgs.slice(0, -2);
   const summary =
-    older.length > 0 ? await gemini.summarizeHistory(older) : null;
+    older.length > 0 ? await assistant.summarizeHistory(older) : null;
 
   return { summary, lastMessage };
 }
@@ -65,8 +65,8 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
   // Start persistent typing indicator for the entire audio pipeline
   startTypingIndicator(msg.from);
   try {
-    // 1. Fetch audio + transcribe & detect language in one Gemini call.
-    //    Gemini hears the raw audio so Pidgin words are preserved (Whisper normalises them away).
+    // 1. Fetch audio + transcribe & detect language in one OpenRouter call.
+    //    The model hears the raw audio so Pidgin words are preserved (Whisper normalises them away).
     const { buffer, mimeType } = await fetchWhatsAppMedia(msg.mediaId);
 
     // Track voice minutes: estimate duration from buffer size
@@ -81,7 +81,7 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
 
     // Transcribe audio and build history context in parallel to save time
     const [{ transcript, language: lang }, historyContext] = await Promise.all([
-      gemini.transcribeAudio(buffer, mimeType),
+      assistant.transcribeAudio(buffer, mimeType),
       buildHistoryContext(conversation.id),
     ]);
 
@@ -122,9 +122,9 @@ export async function handleAudio(msg: ParsedWhatsAppMessage): Promise<void> {
       return;
     }
 
-    // 4. Gemini chat — always reply with voice (isCurrentMessageVoice = true).
+    // 4. AI chat — always reply with voice (isCurrentMessageVoice = true).
     const { summary, lastMessage } = historyContext;
-    const chatResponse = await gemini.chat(transcript, {
+    const chatResponse = await assistant.chat(transcript, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,

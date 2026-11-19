@@ -1,7 +1,7 @@
 import { getExpertsByCity } from "../expert.service";
 import { getSubscription, PLAN_LIMITS, PlanLimits } from "../subscription.service";
 import { sendTextAndLog } from "./send.service";
-import { Language } from "./gemini.service";
+import { Language } from "../ai/assistant.service";
 import { logger } from "../../utils/logger";
 
 // ─── Cooldown: one expert suggestion per conversation per 24 h ───

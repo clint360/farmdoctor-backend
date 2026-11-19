@@ -1,23 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
+import { complete, stripFences } from "./ai/openrouter.service";
+import { FARM_DOCTOR_SYSTEM_PROMPT } from "./ai/systemPrompt";
 import { supabase } from "./db/supabase.service";
 import { logger } from "../utils/logger";
-
-// ─── Gemini client (reuse same pattern as gemini.service.ts) ────────────────
-const getTextModel = () => process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash";
-
-let _client: GoogleGenAI | null = null;
-function client(): GoogleGenAI {
-  if (!_client) {
-    const vertexProject = process.env.VERTEX_PROJECT_ID;
-    const vertexLocation = process.env.VERTEX_LOCATION || "us-central1";
-    if (vertexProject) {
-      _client = new GoogleGenAI({ vertexai: true, project: vertexProject, location: vertexLocation });
-    } else {
-      _client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-    }
-  }
-  return _client;
-}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 export type CropReportRow = {
@@ -237,7 +221,7 @@ function buildCommunityContext(reports: CropReportRow[]): string {
     topLocations ? `Active farming locations: ${topLocations}` : "",
   ];
 
-  // Include a few sample report summaries for Gemini context
+  // Include a few sample report summaries for AI context
   const samples = recentReports
     .filter((r) => r.diagnosis || r.treatment)
     .slice(0, 8)
@@ -343,23 +327,14 @@ export async function searchInsights(
   const communityContext = buildCommunityContext(reports);
   const prompt = buildInsightsPrompt(crop, location ?? null, communityContext, locale ?? null, weather);
 
-  const result = await client().models.generateContent({
-    model: getTextModel(),
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-  });
-
-  const raw = (result.text ?? "").trim();
-  const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .trim();
+  const raw = await complete({ task: "text", system: FARM_DOCTOR_SYSTEM_PROMPT, user: prompt, maxTokens: 2048 });
+  const cleaned = stripFences(raw);
 
   let parsed: Partial<InsightsResult> = {};
   try {
     parsed = JSON.parse(cleaned);
   } catch (err) {
-    logger.error(err, "[insights] Gemini JSON parse failed, raw: " + raw.slice(0, 300));
+    logger.error(err, "[insights] AI JSON parse failed, raw: " + raw.slice(0, 300));
     // Return a safe fallback
     parsed = {
       adviceSummary: cleaned.slice(0, 500),
@@ -442,7 +417,7 @@ async function fetchDbSuggestions(q: string): Promise<string[]> {
   return [...new Set(suggestions)].slice(0, 12);
 }
 
-async function fetchGeminiSuggestions(q: string): Promise<string[]> {
+async function fetchAiSuggestions(q: string): Promise<string[]> {
   const prompt = `You are an agricultural search assistant for Farm Doctor, a platform serving farmers in Cameroon and Central Africa.
 
 The user typed: "${q}"
@@ -458,21 +433,13 @@ Return ONLY a valid JSON array of strings (no markdown, no code fences):
 ["suggestion1","suggestion2","suggestion3","suggestion4","suggestion5","suggestion6","suggestion7","suggestion8"]`;
 
   try {
-    const result = await client().models.generateContent({
-      model: getTextModel(),
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-    });
-    const raw = (result.text ?? "").trim();
-    const cleaned = raw
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/```\s*$/i, "")
-      .trim();
+    const raw = await complete({ task: "text", system: FARM_DOCTOR_SYSTEM_PROMPT, user: prompt, maxTokens: 400 });
+    const cleaned = stripFences(raw);
     const parsed = JSON.parse(cleaned);
     if (Array.isArray(parsed)) return parsed.slice(0, 8).map((s: unknown) => String(s).toLowerCase());
     return [];
   } catch (err) {
-    logger.error(err, "[insights] Gemini suggestions fallback failed");
+    logger.error(err, "[insights] suggestions fallback failed");
     return [];
   }
 }
@@ -506,8 +473,8 @@ export async function getInsightsSuggestions(q: string): Promise<SuggestionsResu
 
   let suggestions = dbSuggestions;
   if (dbSuggestions.length < MIN_DB_SUGGESTIONS) {
-    const geminiSuggestions = await fetchGeminiSuggestions(q);
-    suggestions = [...new Set([...dbSuggestions, ...geminiSuggestions])].slice(0, 10);
+    const aiSuggestions = await fetchAiSuggestions(q);
+    suggestions = [...new Set([...dbSuggestions, ...aiSuggestions])].slice(0, 10);
   }
 
   return { suggestions };

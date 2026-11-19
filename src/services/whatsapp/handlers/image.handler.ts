@@ -7,8 +7,8 @@ import {
 } from "../memory.service";
 import { logMessage } from "../messages.service";
 import { supabase } from "../../db/supabase.service";
-import * as gemini from "../gemini.service";
-import { Language } from "../gemini.service";
+import * as assistant from "../../ai/assistant.service";
+import { Language } from "../../ai/assistant.service";
 import { sendTextAndLog, sendReplyAndLog } from "../send.service";
 import { languageUnknownFallback } from "../language.service";
 import { logger } from "../../../utils/logger";
@@ -90,8 +90,8 @@ export async function handleImage(msg: ParsedWhatsAppMessage): Promise<void> {
       wa_message_id: msg.messageId,
     });
 
-    // 3. Diagnose via Gemini Vision
-    const diagnosis = await gemini.diagnoseImage(buffer, mimeType || "image/jpeg", {
+    // 3. Diagnose via AI vision
+    const diagnosis = await assistant.diagnoseImage(buffer, mimeType || "image/jpeg", {
       language: lang,
       city: conversation.city,
       cropTypes: profile.crop_types,
@@ -117,7 +117,7 @@ export async function handleImage(msg: ParsedWhatsAppMessage): Promise<void> {
     }
 
     // 6. Friendly reply
-    const reply = await gemini.explainDiagnosisToFarmer(diagnosis, {
+    const reply = await assistant.explainDiagnosisToFarmer(diagnosis, {
       language: lang,
       city: conversation.city,
       cropTypes: profile.crop_types,

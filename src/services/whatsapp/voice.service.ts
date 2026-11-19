@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { Language } from "./gemini.service";
+import { Language } from "../ai/assistant.service";
 import {
   sendWhatsAppText,
   uploadWhatsAppMedia,
@@ -139,7 +139,7 @@ export async function synthesizePidgin(
 // ─── Main voice reply function ──────
 // Sends voice note when:
 //   isCurrentMessageVoice == true → user sent voice → reply with voice
-// Pidgin → translate via Gemini, synthesize via YarnGPT
+// Pidgin → translate via OpenRouter, synthesize via YarnGPT
 // English / French → synthesize via OpenAI TTS
 // On failure → fall back to text.
 export async function sendReply(
@@ -156,7 +156,7 @@ export async function sendReply(
   }
 
   try {
-    // Gemini already replies in Pidgin when language=pidgin — no extra translation step needed.
+    // The model already replies in Pidgin when language=pidgin — no extra translation step needed.
     // English/French: synthesize directly via OpenAI TTS.
     logger.info(
       `[voice] lang=${language} | engine=${language === "pidgin" ? "yarngpt" : "openai"} | textLen=${text.length} | sending to TTS…`,

@@ -12,8 +12,8 @@ import {
   askCity,
   cityConfirmation,
 } from "../language.service";
-import * as gemini from "../gemini.service";
-import { Language, type ChatResponse } from "../gemini.service";
+import * as assistant from "../../ai/assistant.service";
+import { Language, type ChatResponse } from "../../ai/assistant.service";
 import { sendTextAndLog, sendReplyAndLog } from "../send.service";
 import { checkAndEnforceQuota } from "../../subscription.service";
 import { maybeSuggestExpert } from "../expert-suggest.service";
@@ -32,7 +32,7 @@ async function buildHistoryContext(conversationId: string) {
   // Summarise all but the last 2 messages (current exchange)
   const older = msgs.slice(0, -2);
   const summary =
-    older.length > 0 ? await gemini.summarizeHistory(older) : null;
+    older.length > 0 ? await assistant.summarizeHistory(older) : null;
 
   return { summary, lastMessage };
 }
@@ -138,7 +138,7 @@ export async function handleText(msg: ParsedWhatsAppMessage): Promise<void> {
   startTypingIndicator(msg.from);
   try {
     const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-    const chatResponse = await gemini.chat(text, {
+    const chatResponse = await assistant.chat(text, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,

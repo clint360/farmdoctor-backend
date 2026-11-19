@@ -1,4 +1,4 @@
-import { Language } from "./gemini.service";
+import { Language } from "../ai/assistant.service";
 
 export function detectLanguageMenuChoice(text: string): Language | null {
   const t = text.trim().toLowerCase();
