@@ -6,6 +6,7 @@ import {
   sendWhatsAppAudio,
 } from "../whatsapp.service";
 import { withRetry } from "./retry.service";
+import { synthesizeFishAudio, isFishAudioConfigured } from "../ai/fishaudio.service";
 import { logger } from "../../utils/logger";
 
 // ─── Config ─────────────────────────
@@ -46,6 +47,21 @@ async function synthesizeOpenAI(
     },
     { label: "openai.synthesize" },
   );
+}
+
+// ─── English + French: Fish Audio, OpenAI as fallback ──
+async function synthesizeEnFr(
+  text: string,
+  lang: "en" | "fr",
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (isFishAudioConfigured()) {
+    try {
+      return await synthesizeFishAudio(text, lang);
+    } catch (err) {
+      logger.warn(err, "[voice] Fish Audio failed, falling back to OpenAI TTS");
+    }
+  }
+  return synthesizeOpenAI(text);
 }
 
 // ─── Split text into speakable chunks ──
@@ -140,7 +156,7 @@ export async function synthesizePidgin(
 // Sends voice note when:
 //   isCurrentMessageVoice == true → user sent voice → reply with voice
 // Pidgin → translate via OpenRouter, synthesize via YarnGPT
-// English / French → synthesize via OpenAI TTS
+// English / French → synthesize via Fish Audio (OpenAI TTS fallback)
 // On failure → fall back to text.
 export async function sendReply(
   to: string,
@@ -157,15 +173,15 @@ export async function sendReply(
 
   try {
     // The model already replies in Pidgin when language=pidgin — no extra translation step needed.
-    // English/French: synthesize directly via OpenAI TTS.
+    // English/French: synthesize via Fish Audio (OpenAI TTS fallback).
     logger.info(
-      `[voice] lang=${language} | engine=${language === "pidgin" ? "yarngpt" : "openai"} | textLen=${text.length} | sending to TTS…`,
+      `[voice] lang=${language} | engine=${language === "pidgin" ? "yarngpt" : isFishAudioConfigured() ? "fishaudio" : "openai"} | textLen=${text.length} | sending to TTS…`,
     );
 
     const audio =
       language === "pidgin"
         ? await synthesizePidgin(text)
-        : await synthesizeOpenAI(text);
+        : await synthesizeEnFr(text, language === "french" ? "fr" : "en");
 
     logger.info(
       `[voice] synthesis OK | ${audio.buffer.byteLength} bytes | mime=${audio.mimeType} | uploading…`,
