@@ -1,6 +1,6 @@
 import { logger } from "../../utils/logger";
 import { complete, completeJson, stripFences } from "./openrouter.service";
-import { toWav } from "./audio.util";
+import { toAudioInput } from "./audio.util";
 import { FARM_DOCTOR_SYSTEM_PROMPT as SYSTEM_PROMPT } from "./systemPrompt";
 
 // ─── Config ─────────────────────────
@@ -299,13 +299,13 @@ export async function transcribeAudio(
   mimeType: string,
 ): Promise<{ transcript: string; language: Language }> {
   try {
-    const wav = await toWav(audioBuffer);
+    const audio = await toAudioInput(audioBuffer);
     const raw = await complete({
       task: "audio",
       temperature: 0,
       maxTokens: 600,
       user: [
-        { type: "audio", base64: wav.toString("base64"), format: "wav" },
+        { type: "audio", base64: audio.buffer.toString("base64"), format: audio.format },
         { type: "text", text: TRANSCRIBE_PROMPT },
       ],
     });
