@@ -14,8 +14,8 @@ import {
   updateProfile,
 } from "../services/whatsapp/memory.service";
 import { logMessage, getConversationMessages } from "../services/whatsapp/messages.service";
-import * as gemini from "../services/whatsapp/gemini.service";
-import { Language } from "../services/whatsapp/gemini.service";
+import * as assistant from "../services/ai/assistant.service";
+import { Language } from "../services/ai/assistant.service";
 import { detectLanguageFromText } from "../services/whatsapp/language.service";
 
 // ─── Helpers ──────────────────────────────────────────
@@ -37,7 +37,7 @@ async function buildHistoryContext(conversationId: string) {
   const lastMessage = lastBotMsg?.body ?? null;
 
   const older = msgs.slice(0, -2);
-  const summary = older.length > 0 ? await gemini.summarizeHistory(older) : null;
+  const summary = older.length > 0 ? await assistant.summarizeHistory(older) : null;
 
   return { summary, lastMessage };
 }
@@ -99,7 +99,7 @@ async function handleText(chatId: number, text: string, name?: string): Promise<
 
   await withTyping(chatId, "typing", async () => {
     const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-    const { reply } = await gemini.chat(text, {
+    const { reply } = await assistant.chat(text, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,
@@ -136,7 +136,7 @@ async function handleImage(chatId: number, fileId: string, name?: string): Promi
 
     await logMessage({ conversation_id: conversation.id, direction: "in", type: "image", media_url: url });
 
-    const diagnosis = await gemini.diagnoseImage(buffer, "image/jpeg", {
+    const diagnosis = await assistant.diagnoseImage(buffer, "image/jpeg", {
       language: lang,
       city: conversation.city,
       cropTypes: profile.crop_types,
@@ -147,7 +147,7 @@ async function handleImage(chatId: number, fileId: string, name?: string): Promi
       await updateConversation(conversation.id, { last_crop: diagnosis.cropType });
     }
 
-    const reply = await gemini.explainDiagnosisToFarmer(diagnosis, {
+    const reply = await assistant.explainDiagnosisToFarmer(diagnosis, {
       language: lang,
       city: conversation.city,
       cropTypes: profile.crop_types,
@@ -176,7 +176,7 @@ async function handleVoice(chatId: number, fileId: string, name?: string): Promi
 
   await withTyping(chatId, "record_voice", async () => {
     const buffer = await downloadFile(url);
-    const { transcript, language: lang } = await gemini.transcribeAudio(buffer, "audio/ogg");
+    const { transcript, language: lang } = await assistant.transcribeAudio(buffer, "audio/ogg");
 
     await logMessage({ conversation_id: conversation.id, direction: "in", type: "audio", body: transcript });
 
@@ -185,7 +185,7 @@ async function handleVoice(chatId: number, fileId: string, name?: string): Promi
     }
 
     const { summary, lastMessage } = await buildHistoryContext(conversation.id);
-    const { reply } = await gemini.chat(transcript, {
+    const { reply } = await assistant.chat(transcript, {
       language: lang,
       city: conversation.city,
       lastCrop: conversation.last_crop,
@@ -200,7 +200,7 @@ async function handleVoice(chatId: number, fileId: string, name?: string): Promi
     try {
       let audioBuffer: Buffer;
       if (lang === "pidgin") {
-        const pidginText = await gemini.translateToPidgin(reply);
+        const pidginText = await assistant.translateToPidgin(reply);
         const { synthesizePidgin } = await import("../services/whatsapp/voice.service");
         const audio = await synthesizePidgin(pidginText);
         audioBuffer = audio.buffer;

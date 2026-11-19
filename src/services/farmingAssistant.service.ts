@@ -1,23 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
-import OpenAI from "openai";
 import sharp from "sharp";
 import { logger } from "../utils/logger";
-
-const vertexProjectId = process.env.VERTEX_PROJECT_ID || "";
-const vertexLocation = process.env.VERTEX_LOCATION || "us-central1";
-const vertexModelName = process.env.VERTEX_GEMINI_MODEL || "gemini-2.5-flash";
-let vertexAI: GoogleGenAI | null = null;
-const geminiApiKey = process.env.GEMINI_API_KEY || "";
-let geminiAI: GoogleGenAI | null = null;
-const getGeminiAI = (): GoogleGenAI | null => {
-  if (!geminiApiKey) return null;
-  if (!geminiAI) geminiAI = new GoogleGenAI({ apiKey: geminiApiKey });
-  return geminiAI;
-};
-const openAiApiKey = process.env.OPENAI_API_KEY || "";
-const openAiTextModel = process.env.OPENAI_TEXT_MODEL || "gpt-4o-mini";
-const openAiVisionModel = process.env.OPENAI_VISION_MODEL || openAiTextModel;
-const openAiClient = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
+import { complete } from "./ai/openrouter.service";
+import { FARM_DOCTOR_SYSTEM_PROMPT } from "./ai/systemPrompt";
 
 export interface FarmingAdviceData {
   crop: string;
@@ -36,170 +20,26 @@ export interface IntentResult {
   intent: IntentLabel;
 }
 
-const getVertexClient = () => {
-  if (!vertexProjectId) {
-    return null;
-  }
-
-  if (!vertexAI) {
-    vertexAI = new GoogleGenAI({
-      vertexai: true,
-      project: vertexProjectId,
-      location: vertexLocation,
-    });
-  }
-
-  return vertexAI;
-};
-
-const generateWithClient = async (
-  client: GoogleGenAI,
-  modelName: string,
-  prompt: string,
-  imagePart?: { data: string; mimeType: string },
-): Promise<string> => {
-  const parts = imagePart
-    ? [{ text: prompt }, { inlineData: imagePart }]
-    : [{ text: prompt }];
-
-  const response = await client.models.generateContent({
-    model: modelName,
-    contents: [{ role: "user", parts }],
-    config: {
-      responseMimeType: "application/json",
-    },
-  });
-
-  if (!response.text) {
-    throw new Error("Gemini returned an empty response.");
-  }
-
-  return response.text;
-};
-
-const generateWithOpenAI = async (
-  prompt: string,
-  imagePart?: { data: string; mimeType: string },
-  modelName?: string,
-): Promise<string> => {
-  if (!openAiClient) {
-    throw new Error("OpenAI is not configured.");
-  }
-
-  const model = modelName || openAiTextModel;
-  const content: Array<
-    | { type: "text"; text: string }
-    | { type: "image_url"; image_url: { url: string } }
-  > = [{ type: "text", text: prompt }];
-
-  if (imagePart?.data && imagePart?.mimeType) {
-    const dataUrl = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-    content.push({ type: "image_url", image_url: { url: dataUrl } });
-  }
-
-  const response = await openAiClient.chat.completions.create({
-    model,
-    messages: [{ role: "user", content }],
-    temperature: 0.4,
-  });
-
-  const text = response.choices?.[0]?.message?.content?.trim();
-  if (!text) {
-    throw new Error("OpenAI returned an empty response.");
-  }
-
-  return text;
-};
-
+/**
+ * All generation goes through the shared OpenRouter client + shared system
+ * prompt. Per-request text is passed as the user message, so requests are
+ * independent and safe to run concurrently.
+ */
 const generateWithFallback = async (
   prompt: string,
   imagePart?: { inlineData: { data: string; mimeType: string } },
-  modelName?: string,
-) => {
-  const resolvedModelName = modelName || "gemini-2.5-flash";
-
-  // Try Vertex AI first (preferred)
-  const vertexClient = getVertexClient();
-  if (vertexClient) {
-    try {
-      return await withGeminiRetry(() =>
-        generateWithClient(
-          vertexClient,
-          modelName || vertexModelName,
-          prompt,
-          imagePart?.inlineData,
-        ),
-      );
-    } catch (vertexError: any) {
-      logger.warn({ message: vertexError?.message, status: vertexError?.status, code: vertexError?.code }, "Vertex AI failed, trying API key fallback");
-    }
-  } else {
-    logger.info("Vertex AI skipped: VERTEX_PROJECT_ID not set");
-  }
-
-  // Fall back to API key
-  const apiKeyClient = getGeminiAI();
-  if (apiKeyClient) {
-    try {
-      return await withGeminiRetry(() =>
-        generateWithClient(
-          apiKeyClient,
-          resolvedModelName,
-          prompt,
-          imagePart?.inlineData,
-        ),
-      );
-    } catch (error: any) {
-      logger.warn({ message: error?.message, status: error?.status, code: error?.code }, "Gemini API key failed, trying OpenAI fallback");
-    }
-  } else {
-    logger.info("Gemini API key skipped: GEMINI_API_KEY not set");
-  }
-
-  // Final fallback: OpenAI
-  logger.info({ model: imagePart ? openAiVisionModel : openAiTextModel }, "Attempting OpenAI fallback");
-  return await generateWithOpenAI(
-    prompt,
-    imagePart?.inlineData,
-    imagePart ? openAiVisionModel : openAiTextModel,
-  );
-};
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-const extractRetryDelayMs = (error: any, fallbackMs = 45000): number => {
-  const retryInfo = error?.errorDetails?.find(
-    (detail: any) => detail?.retryDelay,
-  );
-  const retryDelay = retryInfo?.retryDelay as string | undefined;
-
-  if (retryDelay) {
-    const secondsMatch = retryDelay.match(/(\d+(?:\.\d+)?)s/);
-    if (secondsMatch) {
-      const seconds = Number.parseFloat(secondsMatch[1]);
-      if (Number.isFinite(seconds)) {
-        return Math.ceil(seconds * 1000);
-      }
-    }
-  }
-
-  return fallbackMs;
-};
-
-const withGeminiRetry = async <T>(operation: () => Promise<T>): Promise<T> => {
-  try {
-    return await operation();
-  } catch (error: any) {
-    if (error?.status === 429) {
-      const delayMs = extractRetryDelayMs(error);
-      logger.warn({ delayMs }, "Gemini quota hit, retrying after delay");
-      await sleep(delayMs);
-      return await operation();
-    }
-    throw error;
-  }
-};
+): Promise<string> =>
+  complete({
+    task: imagePart ? "vision" : "text",
+    system: FARM_DOCTOR_SYSTEM_PROMPT,
+    json: true,
+    user: imagePart
+      ? [
+          { type: "text", text: prompt },
+          { type: "image", base64: imagePart.inlineData.data, mimeType: imagePart.inlineData.mimeType },
+        ]
+      : prompt,
+  });
 
 const pidginSystemInstruction = `You are a helpful agronomist. Speak and reply only in Cameroon Pidgin English (CamP).
 Use natural Cameroon Pidgin phrasing like "how for do", "for true", and "na so" when it fits.
@@ -387,16 +227,11 @@ export const analyzeImage = async (
 
     const usePidgin = options?.preferredLanguage === "pidgin";
     const prompt = buildImagePrompt(usePidgin);
-    const modelName = usePidgin ? "gemini-2.5-pro" : undefined;
-    const responseText = await generateWithFallback(
-      prompt,
-      imagePart,
-      modelName,
-    );
+    const responseText = await generateWithFallback(prompt, imagePart);
 
     return JSON.parse(responseText) as FarmingAdviceData;
   } catch (error) {
-    logger.error(error, "Error analyzing crop image using Gemini");
+    logger.error(error, "Error analyzing crop image");
     throw error;
   }
 };
@@ -418,16 +253,11 @@ export const generateAdvice = async (
       usePidgin,
       options?.contextSummary,
     );
-    const modelName = usePidgin ? "gemini-2.5-pro" : undefined;
-    const responseText = await generateWithFallback(
-      prompt,
-      undefined,
-      modelName,
-    );
+    const responseText = await generateWithFallback(prompt);
 
     return JSON.parse(responseText) as FarmingAdviceData;
   } catch (error) {
-    logger.error(error, "Error generating farming advice using Gemini");
+    logger.error(error, "Error generating farming advice");
     throw error;
   }
 };
@@ -462,7 +292,7 @@ Text to translate: "${text}"`;
 
     return JSON.parse(responseText) as TranslationData;
   } catch (error) {
-    logger.error(error, `Error translating to ${targetLanguage} using Gemini`);
+    logger.error(error, `Error translating to ${targetLanguage} `);
     throw error;
   }
 };

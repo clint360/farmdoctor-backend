@@ -1,7 +1,7 @@
 import { sendWhatsAppText } from "../whatsapp.service";
 import { sendReply } from "./voice.service";
 import { logMessage } from "./messages.service";
-import { Language } from "./gemini.service";
+import { Language } from "../ai/assistant.service";
 
 // ─── Send wrappers that also persist messages to the dashboard log ───
 // Handlers should use these instead of raw WhatsApp send functions

@@ -13,9 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@fastify/cors": "^8.5.0",
-    "@google-cloud/speech": "^6.6.0",
     "@google-cloud/text-to-speech": "^5.3.0",
-    "@google/genai": "^1.48.0",
     "@supabase/supabase-js": "^2.101.1",
     "dotenv": "^16.4.5",
     "fastify": "^4.26.1",

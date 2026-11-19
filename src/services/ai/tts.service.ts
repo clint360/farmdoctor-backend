@@ -2,6 +2,7 @@ import textToSpeech from "@google-cloud/text-to-speech";
 import OpenAI from "openai";
 import { spawn } from "node:child_process";
 import { logger } from "../../utils/logger";
+import { synthesizeFishAudio, isFishAudioConfigured } from "./fishaudio.service";
 
 const ttsClient = new textToSpeech.TextToSpeechClient();
 
@@ -172,6 +173,14 @@ export const ttsService = {
       const normalizedText = simplifyPidginText(text);
       if (!normalizedText) {
         return Buffer.from("");
+      }
+
+      if (isFishAudioConfigured() && (language === "en" || language === "fr")) {
+        try {
+          return (await synthesizeFishAudio(normalizedText, language)).buffer;
+        } catch (error: any) {
+          logger.warn({ message: error?.message }, "Fish Audio TTS failed, falling back");
+        }
       }
 
       let wavBuffer: Buffer;

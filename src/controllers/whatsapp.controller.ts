@@ -17,7 +17,7 @@ import {
 } from "../services/whatsapp/memory.service";
 import { logMessage } from "../services/whatsapp/messages.service";
 import { askCity } from "../services/whatsapp/language.service";
-import { Language } from "../services/whatsapp/gemini.service";
+import { Language } from "../services/ai/assistant.service";
 import { handleExpertResponse } from "../services/whatsapp/expert-suggest.service";
 import { handleExpertClaim } from "../services/missed-call.service";
 
@@ -51,8 +51,8 @@ function parseLanguageFromInteractive(interactiveId?: string): Language | null {
 //   1. Deduplication + cancellation of in-flight retries
 //   2. Interactive list language selection (enhanced onboarding)
 //   3. Delegates to text/image/audio handlers (which handle text-based
-//      language selection, city onboarding, Gemini chat, Gemini Vision
-//      diagnosis, Gemini audio transcription, voice replies, crop reports, etc.)
+//      language selection, city onboarding, AI chat, AI vision
+//      diagnosis, AI audio transcription, voice replies, crop reports, etc.)
 async function routeWhatsAppMessage(msg: ParsedWhatsAppMessage) {
   try {
     // ── Handle interactive list reply (language selection menu) ──

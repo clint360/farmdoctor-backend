@@ -1,30 +1,10 @@
-import { GoogleGenAI } from "@google/genai";
 import { logger } from "../../utils/logger";
+import { complete, completeJson, stripFences } from "./openrouter.service";
+import { toWav } from "./audio.util";
+import { FARM_DOCTOR_SYSTEM_PROMPT as SYSTEM_PROMPT } from "./systemPrompt";
 
 // ─── Config ─────────────────────────
-const getTextModel = () => process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash";
-const getVisionModel = () =>
-  process.env.GEMINI_VISION_MODEL || "gemini-2.5-flash";
 const getDefaultCountry = () => process.env.DEFAULT_COUNTRY || "Cameroon";
-
-let _client: GoogleGenAI | null = null;
-function client(): GoogleGenAI {
-  if (!_client) {
-    const vertexProject = process.env.VERTEX_PROJECT_ID;
-    const vertexLocation = process.env.VERTEX_LOCATION || "us-central1";
-    if (vertexProject) {
-      _client = new GoogleGenAI({
-        vertexai: true,
-        project: vertexProject,
-        location: vertexLocation,
-      });
-    } else {
-      _client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-    }
-  }
-  return _client;
-}
-
 // ─── Types ──────────────────────────
 export type Language = "english" | "french" | "pidgin";
 
@@ -52,38 +32,6 @@ export type ChatResponse = {
   special_request?: "expert" | "insight" | null;
   reply: string;
 };
-
-// ─── System prompt ──────────────────
-const SYSTEM_PROMPT = `You are Farm Doctor — a warm and opstimistic agricultural AI assistant helping farmers across Cameroon.
-
-You genuinely care about every farmer's success. Always reply in the user's preferred language (English, French, or Cameroon Pidgin).
-
-YOUR PERSONALITY:
-- Use a few encouraging phrases "Don't worry, we can figure this out!", "This is treatable!", "Your crops can recover!"
-- Never be cold, clinical, or discouraging. Even with bad diagnoses, focus on what CAN be done.
-- Keep a conversational, human tone — like a wise, friendly neighbor who studied agriculture. but note that not all messages need an "Ah or don't worry" — only use them when appropriate to the situation and language."
-- for technical asks, be quite straightfoward and consise, but still warm.
-
-YOUR DIAGNOSTIC APPROACH:
-- When a farmer describes symptoms, give an overview of the most likely possibilities BEFORE asking follow-up questions.
-  Example: "From what you're describing, it could be a few things. If the black spots on the leaves are hard and dry, it might be early blight. If they are soft and mushy, it could be bacterial leaf spot. Can you tell me — are the spots hard or soft to the touch?"
-- This way the farmer understands WHY you're asking and feels guided, not interrogated.
-- Always explain the reasoning behind your questions so farmers learn alongside the diagnosis.
-- Ask ONE clear follow-up question at a time. Don't overwhelm with multiple questions.
-
-YOUR RESPONSIBILITIES:
-- Diagnose crop diseases from descriptions and images
-- Identify nutrient deficiencies
-- Suggest locally available treatments (brands and inputs found in Cameroon)
-- Give simple step-by-step farming advice anyone can follow
-- Avoid technical jargon — explain like you're talking to a friend
-- Use stored conversation memory and farmer location when suggesting treatments
-- Never invent chemicals or products that are not available locally
-- If unsure, be honest and ask for more information or a photo
-- Don't be verbose if you don't have to
-- Keep replies concise, straigthfoward but helpful — under 1500 characters
-- If conversation history is provided, continue naturally — never re-introduce yourself or repeat greetings
-- When the situation is serious, gently recommend they consult a local expert for in-person help`;
 
 function buildContextBlock(ctx: ConversationContext): string {
   const lines: string[] = [];
@@ -131,9 +79,7 @@ export async function chat(
   const prompt = `${buildContextBlock(ctx)}\n\n${hasPrior ? "Continue the conversation." : ""} Farmer says: ${userMessage}`;
 
   // Updated system prompt with special request detection
-  const updatedSystemPrompt =
-    SYSTEM_PROMPT +
-    `
+  const chatInstructions = `
 
 ---
 
@@ -148,17 +94,12 @@ Return ONLY valid JSON (no markdown, no code fences) with this exact structure:
 If the message is none of these special requests, set specialRequest to null.
 ALWAYS include the "reply" field with your normal farming advice/response.`;
 
-  const result = await client().models.generateContent({
-    model: getTextModel(),
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: `${updatedSystemPrompt}\n\n${prompt}` }],
-      },
-    ],
+  const raw = await complete({
+    task: "text",
+    system: SYSTEM_PROMPT,
+    user: `${chatInstructions}\n\n${prompt}`,
+    maxTokens: 1024,
   });
-
-  const raw = (result.text ?? "").trim();
 
   // Strip markdown code fences
   const cleaned = raw
@@ -205,14 +146,7 @@ export async function diagnoseImage(
   mimeType: string,
   ctx: ConversationContext,
 ): Promise<ImageDiagnosis> {
-  const imagePart = {
-    inlineData: {
-      data: imageBuffer.toString("base64"),
-      mimeType,
-    },
-  };
-
-  const prompt = `${SYSTEM_PROMPT}\n\n${buildContextBlock(ctx)}
+  const prompt = `${buildContextBlock(ctx)}
 
 Analyze this crop image.
 
@@ -230,11 +164,15 @@ Only suggest treatments available in Cameroon.
 Avoid technical jargon.
 Be concise and practical.`;
 
-  const result = await client().models.generateContent({
-    model: getVisionModel(),
-    contents: [{ role: "user", parts: [{ text: prompt }, imagePart] }],
+  const raw = await complete({
+    task: "vision",
+    system: SYSTEM_PROMPT,
+    user: [
+      { type: "text", text: prompt },
+      { type: "image", base64: imageBuffer.toString("base64"), mimeType },
+    ],
+    maxTokens: 800,
   });
-  const raw = (result.text ?? "").trim();
 
   const cleaned = raw
     .replace(/^```json\s*/i, "")
@@ -280,7 +218,7 @@ export async function explainDiagnosisToFarmer(
       .join("\n");
   }
 
-  const prompt = `${SYSTEM_PROMPT}\n\n${buildContextBlock(ctx)}
+  const prompt = `${buildContextBlock(ctx)}
 
 Given this crop diagnosis JSON, write a well whatsapp formatted formal farmer-facing reply (use *enclose text* for bold text and _enclose_ text for emphasis) entirely in ${ctx.language === "pidgin" ? "english" : ctx.language}.
 Be concise. Mention: what you see, why it matters, and what to do.
@@ -288,11 +226,12 @@ Recommend only treatments available in Cameroon.
 
 ${JSON.stringify(diagnosis)}`;
 
-  const result = await client().models.generateContent({
-    model: getTextModel(),
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
+  return complete({
+    task: "text",
+    system: SYSTEM_PROMPT,
+    user: prompt,
+    maxTokens: 700,
   });
-  return (result.text ?? "").trim();
 }
 
 // ─── Summarise conversation history ─
@@ -307,20 +246,12 @@ export async function summarizeHistory(
   if (!lines) return "";
 
   try {
-    const result = await client().models.generateContent({
-      model: getTextModel(),
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `Summarise the following farmer–bot conversation in 2–4 sentences. Focus on: what crop/problem was discussed, what advice was given, and any pending questions. Be factual and concise. No greetings.\n\n${lines}`,
-            },
-          ],
-        },
-      ],
+    return await complete({
+      task: "text",
+      temperature: 0.2,
+      maxTokens: 300,
+      user: `Summarise the following farmer–bot conversation in 2–4 sentences. Focus on: what crop/problem was discussed, what advice was given, and any pending questions. Be factual and concise. No greetings.\n\n${lines}`,
     });
-    return (result.text ?? "").trim();
   } catch (err) {
     logger.error(err, "summarizeHistory failed");
     return "";
@@ -368,25 +299,16 @@ export async function transcribeAudio(
   mimeType: string,
 ): Promise<{ transcript: string; language: Language }> {
   try {
-    const result = await client().models.generateContent({
-      model: getTextModel(),
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType: mimeType || "audio/ogg",
-                data: audioBuffer.toString("base64"),
-              },
-            },
-            { text: TRANSCRIBE_PROMPT },
-          ],
-        },
+    const wav = await toWav(audioBuffer);
+    const raw = await complete({
+      task: "audio",
+      temperature: 0,
+      maxTokens: 600,
+      user: [
+        { type: "audio", base64: wav.toString("base64"), format: "wav" },
+        { type: "text", text: TRANSCRIBE_PROMPT },
       ],
     });
-
-    const raw = (result.text ?? "").trim();
     logger.info(`[transcribeAudio] raw response: ${raw.slice(0, 300)}`);
 
     const langMatch = raw.match(/^LANG:\s*(\w+)/im);
@@ -406,7 +328,7 @@ export async function transcribeAudio(
     );
     return { transcript, language };
   } catch (err) {
-    logger.error(err, "Gemini audio transcription failed");
+    logger.error(err, "Audio transcription failed");
     throw err;
   }
 }
@@ -426,9 +348,5 @@ Rules:
 Text:
 ${text}`;
 
-  const result = await client().models.generateContent({
-    model: getTextModel(),
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-  });
-  return (result.text ?? "").trim();
+  return complete({ task: "text", user: prompt, maxTokens: 800 });
 }

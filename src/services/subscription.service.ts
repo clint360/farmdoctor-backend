@@ -6,7 +6,7 @@ import {
   FapshiStatus,
 } from "./fapshi.service";
 import { createSubscriptionLimitMessage, createSubscriptionConfirmationMessage } from "./whatsapp/language.service";
-import { Language } from "./whatsapp/gemini.service";
+import { Language } from "./ai/assistant.service";
 import { sendWhatsAppText } from "./whatsapp.service";
 
 // ─── Plan definitions ───────────────
