@@ -19,7 +19,12 @@ function getRetellClient(): Retell {
 /**
  * Create a web call session and return the access token for the client SDK
  */
-export async function createWebCall(): Promise<{ access_token: string; call_id: string }> {
+export async function createWebCall(): Promise<{
+  access_token: string;
+  call_id: string;
+  transport: string;
+  ice_servers: unknown[];
+}> {
   if (!retellAgentId) {
     throw new Error("RETELL_AGENT_ID is not configured");
   }
@@ -35,5 +40,7 @@ export async function createWebCall(): Promise<{ access_token: string; call_id: 
   return {
     access_token: callResponse.access_token,
     call_id: callResponse.call_id,
+    transport: callResponse.transport,
+    ice_servers: callResponse.ice_servers,
   };
 }

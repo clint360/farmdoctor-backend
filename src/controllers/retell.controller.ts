@@ -60,6 +60,8 @@ export const handleCreateWebCall = async (request: FastifyRequest, reply: Fastif
       success: true,
       access_token: result.access_token,
       call_id: result.call_id,
+      transport: result.transport,
+      ice_servers: result.ice_servers,
       remaining_seconds: remaining,
     });
   } catch (error: any) {
