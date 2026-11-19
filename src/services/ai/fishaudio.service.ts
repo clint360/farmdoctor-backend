@@ -11,9 +11,13 @@ const API_URL = () => process.env.FISH_AUDIO_API_URL || "https://api.fish.audio/
 
 export const isFishAudioConfigured = (): boolean => !!process.env.FISH_AUDIO_API_KEY;
 
-function voiceFor(lang: FishLanguage): string | undefined {
+// Default public Fish Audio voices (neutral, non-celebrity). Override via env.
+const DEFAULT_VOICE_EN = "536d3a5e000945adb7038665781a4aca"; // "Ethan" – clear, professional narration
+const DEFAULT_VOICE_FR = "5567200c7d8341738f0892bbacd3be3c"; // "Féminine" – calm, professional
+
+function voiceFor(lang: FishLanguage): string {
   const specific = lang === "fr" ? process.env.FISH_AUDIO_VOICE_FR : process.env.FISH_AUDIO_VOICE_EN;
-  return specific || process.env.FISH_AUDIO_VOICE_ID || undefined;
+  return specific || process.env.FISH_AUDIO_VOICE_ID || (lang === "fr" ? DEFAULT_VOICE_FR : DEFAULT_VOICE_EN);
 }
 
 export async function synthesizeFishAudio(
